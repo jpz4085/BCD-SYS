@@ -8,7 +8,7 @@ recbcdpath="$destpath/EFI/Microsoft/Recovery/BCD"
 locscript="cd Objects\\{9dea862c-5cdd-4e70-acc1-f32b344d4795}\\\Elements\\\12000005\nlsval Element\nunload\n"
 
 if [[ "$createbcd" == "false" ]]; then
-   wbmlocale=$(printf "$locscript" | hivexsh "$recbcdpath")
+   wbmlocale=$(printf "$locscript" | sudo hivexsh "$recbcdpath")
 fi
 
 ### Windows Boot Manager Entry ###
