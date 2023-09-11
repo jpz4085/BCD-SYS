@@ -36,7 +36,8 @@ echo "from an existing BCD when creating new entries. The system template"
 echo "at Windows/System32/config/BCD-Template is currently ignored."
 echo
 echo "The default firmware type is the same type running under Linux. UEFI"
-echo "is currently the only firmware option until BIOS support is finished."
+echo "is supported on GPT and MBR disks while BIOS requires legacy bootable"
+echo "MBR partitions with boot sectors created using a tool such as ms-sys."
 echo "The Windows Boot Manager will be added to the UEFI firmware boot menu"
 echo "except when using the --syspath option which must rely on the default"
 echo "path at /EFI/BOOT/BOOTX64.efi"
@@ -44,28 +45,32 @@ exit
 }
 
 remove_duplicates () {
-bcdpath="$2/EFI/Microsoft/Boot/BCD"
+if   [[ "$3" == "uefi" ]]; then
+     bcdpath="$2/EFI/Microsoft/Boot/BCD"
+elif [[ "$3" == "bios" ]]; then
+     bcdpath="$2/Boot/BCD"
+fi
 newdevstr=$($resdir/update_device.sh "$1" | sed 's/.*://;')
 newdevstr=${newdevstr,,}
 ordscript="cd Objects\\{9dea862c-5cdd-4e70-acc1-f32b344d4795}\\\Elements\\\24000001\n"
 rldrscript="cd Objects\\{9dea862c-5cdd-4e70-acc1-f32b344d4795}\\\Elements\\\23000006\n"
 
-readarray -t objects <<< $(printf "cd Objects\nls\nq\n" | hivexsh "$bcdpath")
+readarray -t objects <<< $(printf "cd Objects\nls\nq\n" | sudo hivexsh "$bcdpath")
 
 for key in "${!objects[@]}"
 do
-	curdevstr=$(printf "cd Objects\\${objects[$key]}\\\Elements\\\11000001\nlsval\nq" | hivexsh "$bcdpath" 2> /dev/null | sed 's/.*://;')
+	curdevstr=$(printf "cd Objects\\${objects[$key]}\\\Elements\\\11000001\nlsval\nq" | sudo hivexsh "$bcdpath" 2> /dev/null | sed 's/.*://;')
 	if [[ "$curdevstr" == "$newdevstr" ]]; then
 	   echo "Remove entry at ${objects[$key]}"
 	   printf "cd Objects\\${objects[$key]}\ndel\ncommit\nunload\n" | sudo hivexsh -w "$bcdpath"
-	   wbmdsporder=$(printf "$ordscript""lsval\nunload\n" | hivexsh "$bcdpath" | sed 's/.*://;s/,//g')
+	   wbmdsporder=$(printf "$ordscript""lsval\nunload\n" | sudo hivexsh "$bcdpath" | sed 's/.*://;s/,//g')
 	   guidstr=$(printf '%s\0' "${objects[$key]}" | hexdump -ve '/1 "%02x\0\0"')
 	   if [[ "$wbmdsporder" == *"$guidstr"* ]]; then
 	      echo "Remove ${objects[$key]} from WBM display order."
 	      newdsporder=$(printf "%s" "$wbmdsporder" | sed "s/$guidstr//")
 	      printf "$ordscript""setval 1\nElement\nhex:7:%s\ncommit\nunload\n" "$newdsporder" | sudo hivexsh -w "$bcdpath"
 	   fi
-	   wbmresldr=$(printf "$rldrscript""lsval\nunload\n" | hivexsh "$bcdpath" | sed 's/.*=//;s/"//g')
+	   wbmresldr=$(printf "$rldrscript""lsval\nunload\n" | sudo hivexsh "$bcdpath" | sed 's/.*=//;s/"//g')
 	   if [[ "$wbmresldr" == "${objects[$key]}" ]]; then
 	      echo "Remove ${objects[$key]} from WBM resume object."
 	      printf "$rldrscript""setval 0\ncommit\nunload\n" | sudo hivexsh -w "$bcdpath"
@@ -75,41 +80,79 @@ done
 }
 
 build_stores () {
-echo "Build main and recovery BCD stores..."
-$resdir/winload.sh "$1" "$2" "$3" "$4" "$5" "$6" "$7" > $tmpdir/winload.txt && $resdir/recovery.sh "$2" "$4" "$7" > $tmpdir/recovery.txt
-cp $resdir/Templates/BCD-NEW $tmpdir/BCD-Windows && cp $resdir/Templates/BCD-NEW $tmpdir/BCD-Recovery
+echo "Build the main BCD store..."
+$resdir/winload.sh "$1" "$2" "$3" "$4" "$5" "$6" "$7" "$8" > $tmpdir/winload.txt
+cp $resdir/Templates/BCD-NEW $tmpdir/BCD-Windows
 hivexregedit --merge --prefix BCD00000001 $tmpdir/BCD-Windows $resdir/Templates/winload.reg
-hivexregedit --merge --prefix BCD00000001 $tmpdir/BCD-Recovery $resdir/Templates/recovery.reg
-hivexsh -w $tmpdir/BCD-Windows -f $tmpdir/winload.txt && hivexsh -w $tmpdir/BCD-Recovery -f $tmpdir/recovery.txt
-echo "Copy the BCD hives to the ESP folders..."
-sudo cp $tmpdir/BCD-Windows "$2"/EFI/Microsoft/Boot/BCD
-sudo cp $tmpdir/BCD-Recovery "$2"/EFI/Microsoft/Recovery/BCD
+hivexsh -w $tmpdir/BCD-Windows -f $tmpdir/winload.txt
+if   [[ "$3" == "uefi" ]]; then
+     echo "Build the recovery BCD store..."
+     $resdir/recovery.sh "$2" "$5" "$8" > $tmpdir/recovery.txt
+     cp $resdir/Templates/BCD-NEW $tmpdir/BCD-Recovery
+     hivexregedit --merge --prefix BCD00000001 $tmpdir/BCD-Recovery $resdir/Templates/recovery.reg
+     hivexsh -w $tmpdir/BCD-Recovery -f $tmpdir/recovery.txt
+     echo "Copy the BCD hives to the ESP folders..."
+     sudo cp $tmpdir/BCD-Windows "$2"/EFI/Microsoft/Boot/BCD
+     sudo cp $tmpdir/BCD-Recovery "$2"/EFI/Microsoft/Recovery/BCD
+elif [[ "$3" == "bios" ]]; then
+     echo "Copy the main BCD hive to the boot folder..."
+     sudo cp $tmpdir/BCD-Windows "$2"/Boot/BCD
+fi
 }
 
 update_winload () {
-remove_duplicates "$1" "$2"
-echo "Update current BCD stores with new entries..."
-$resdir/winload.sh "$1" "$2" "$3" "$4" "$5" "$6" "$7" > $tmpdir/winload.txt && $resdir/recovery.sh "$2" "$4" "$7" > $tmpdir/recovery.txt
-sudo hivexsh -w "$2/EFI/Microsoft/Boot/BCD" -f $tmpdir/winload.txt && sudo hivexsh -w "$2/EFI/Microsoft/Recovery/BCD" -f $tmpdir/recovery.txt
+remove_duplicates "$1" "$2" "$3"
+echo "Update main BCD hive with new entries..."
+$resdir/winload.sh "$1" "$2" "$3" "$4" "$5" "$6" "$7" "$8" > $tmpdir/winload.txt
+if   [[ "$3" == "uefi" ]]; then
+     sudo hivexsh -w "$2/EFI/Microsoft/Boot/BCD" -f $tmpdir/winload.txt
+     echo "Update recovery BCD hive with new entries..."
+     $resdir/recovery.sh "$2" "$5" "$8" > $tmpdir/recovery.txt
+     sudo hivexsh -w "$2/EFI/Microsoft/Recovery/BCD" -f $tmpdir/recovery.txt
+elif [[ "$3" == "bios" ]]; then
+     sudo hivexsh -w "$2/Boot/BCD" -f $tmpdir/winload.txt
+fi
 }
 
 copy_bootmgr () {
-echo "Copy the EFI boot files to the ESP..."
-sudo mkdir -p "$2"/EFI/Microsoft/Recovery
-sudo cp -r "$1"/Windows/Boot/EFI "$2"/EFI/Microsoft/Boot
-sudo cp -r "$1"/Windows/Boot/Fonts "$2"/EFI/Microsoft/Boot
-sudo cp -r "$1"/Windows/Boot/Resources "$2"/EFI/Microsoft/Boot
+if   [[ "$3" == "uefi" ]]; then
+     echo "Copy the EFI boot files to the ESP..."
+     sudo mkdir -p "$2"/EFI/Microsoft/Recovery
+     sudo cp -r "$1"/Windows/Boot/EFI "$2"/EFI/Microsoft/Boot
+     sudo cp -r "$1"/Windows/Boot/Fonts "$2"/EFI/Microsoft/Boot
+     sudo cp -r "$1"/Windows/Boot/Resources "$2"/EFI/Microsoft/Boot
+elif [[ "$3" == "bios" ]]; then
+     echo "Copy the BIOS boot files to the system partition..."
+     sudo cp -r "$1"/Windows/Boot/PCAT "$2"/Boot
+     sudo cp -r "$1"/Windows/Boot/Fonts "$2"/Boot
+     sudo cp -r "$1"/Windows/Boot/Resources "$2"/Boot
+     sudo mv "$2"/Boot/bootmgr "$2" && sudo mv "$2"/Boot/bootnxt "$2"/BOOTNXT
+     if [[ "$4" == "ntfs" ]]; then
+        echo "Set extended NTFS attributes (Hidden/System/Read Only)..."
+        sudo setfattr -h -v 0x00000027 -n system.ntfs_attrib_be "$2"/bootmgr
+        sudo setfattr -h -v 0x00040026 -n system.ntfs_attrib_be "$2"/BOOTNXT
+        sudo setfattr -h -v 0x10000006 -n system.ntfs_attrib_be "$2"/Boot
+     fi
+     if [[ "$4" == "vfat" ]]; then
+        echo "Set filesystem attributes (Hidden/System/Read Only)..."
+        sudo fatattr +shr "$2"/bootmgr
+        sudo fatattr +sh "$2"/BOOTNXT
+        sudo fatattr +sh "$2"/Boot
+     fi
+fi
 }
+
+if [[ $# -eq 0 ]]; then usage; fi
 
 if [[ -z $(command -v hivexsh) ]]; then missing+=" hivex"; fi
 if [[ -z $(command -v hivexregedit) ]]; then missing+=" hivexregedit"; fi
+if [[ -z $(command -v setfattr) ]]; then missing+=" attr/setfattr"; fi
+if [[ -z $(command -v fatattr) ]]; then missing+=" fatattr"; fi
 if [[ -z $(command -v peres) ]]; then missing+=" pev/peres"; fi
 if [[ ! -z "$missing" ]]; then
    echo "The following packages are required:""$missing"
    exit 1
 fi
-
-if [[ $# -eq 0 ]]; then usage; fi
 
 shopt -s nocasematch
 while (( "$#" )); do
@@ -193,19 +236,19 @@ if   [[ "$firmware" == "uefi" ]]; then
      defbootpath="$syspath/EFI/BOOT/BOOTX64.efi"
      syswbmpath="$syspath/EFI/Microsoft/Boot/bootmgfw.efi"
      localwbmpath="$winpath/Windows/Boot/EFI/bootmgfw.efi"
-     if [[ -f "$defbootpath" ]]; then
-        defbootver=$(peres -v "$defbootpath" | grep 'Product Version:' | awk '{print $3}')
+     if sudo test -f "$defbootpath"; then
+        defbootver=$(sudo peres -v "$defbootpath" 2> /dev/null | grep 'Product Version:' | awk '{print $3}')
      fi
-     if [[ -f "$syswbmpath" && -f "$localwbmpath" ]]; then
-        syswbmver=$(peres -v "$syswbmpath" | grep 'Product Version:' | awk '{print $3}')
+     if sudo test -f "$syswbmpath" && test -f "$localwbmpath"; then
+        syswbmver=$(sudo peres -v "$syswbmpath" | grep 'Product Version:' | awk '{print $3}')
         localwbmver=$(peres -v "$localwbmpath" | grep 'Product Version:' | awk '{print $3}')
      fi
      if   [[ ! -f "$localwbmpath" ]]; then
           echo "Unable to find the EFI boot files at $winpath"
           exit 1
-     elif [[ ! -f "$syswbmpath" ]]; then
-          copy_bootmgr "$winpath" "$syspath"
-          build_stores "$winpath" "$syspath" "$setfwmod" "$createbcd" "$prewbmdef" "$prodname" "$locale"
+     elif ! sudo test -f "$syswbmpath"; then
+          copy_bootmgr "$winpath" "$syspath" "$firmware"
+          build_stores "$winpath" "$syspath" "$firmware" "$setfwmod" "$createbcd" "$prewbmdef" "$prodname" "$locale"
           wbmoptnum=$(efibootmgr | grep "Windows Boot Manager" | awk '{print $1}' | sed 's/Boot0*//;s/\*//')
           if [[ ! -z "$wbmoptnum" && "$setfwmod" == "false" ]]; then
              echo "Remove the current Windows Boot Manager option..."
@@ -217,34 +260,34 @@ if   [[ "$firmware" == "uefi" ]]; then
              wbmpath="\\EFI\\Microsoft\\Boot\\bootmgfw.efi"
              sudo efibootmgr -c -d "$efidisk" -p "$efinum" -l "$wbmpath" -L "Windows Boot Manager" -@ $resdir/Templates/wbmoptdata.bin > /dev/null
           fi
-     elif [[ -f "$syswbmpath" && "$clean" == "true" ]]; then
+     elif sudo test -f "$syswbmpath" && [[ "$clean" == "true" ]]; then
           echo "Remove current main and recovery BCD stores..."
           sudo rm -f "$syspath"/EFI/Microsoft/Boot/BCD
           sudo rm -f "$syspath"/EFI/Microsoft/Recovery/BCD
           if [[ "$syswbmver" != "$localwbmver" && $(printf "$syswbmver\n$localwbmver\n" | sort -rV | head -1) == "$localwbmver" ]]; then
-             if [[ -f "$defbootpath" && "$defbootver" == "$syswbmver" ]]; then
+             if sudo test -f "$defbootpath" && [[ "$defbootver" == "$syswbmver" ]]; then
                 sudo rm "$defbootpath"
              fi
-             sudo rm -rf "$syspath/EFI/Microsoft" && copy_bootmgr "$winpath" "$syspath"
+             sudo rm -rf "$syspath/EFI/Microsoft" && copy_bootmgr "$winpath" "$syspath" "$firmware"
           fi
-          build_stores "$winpath" "$syspath" "$setfwmod" "$createbcd" "$prewbmdef" "$prodname" "$locale"
+          build_stores "$winpath" "$syspath" "$firmware" "$setfwmod" "$createbcd" "$prewbmdef" "$prodname" "$locale"
      else
           createbcd="false"
           if [[ "$syswbmver" != "$localwbmver" && $(printf "$syswbmver\n$localwbmver\n" | sort -rV | head -1) == "$localwbmver" ]]; then
-             if [[ -f "$defbootpath" && "$defbootver" == "$syswbmver" ]]; then
+             if sudo test -f "$defbootpath" && [[ "$defbootver" == "$syswbmver" ]]; then
                 sudo rm "$defbootpath"
              fi
              echo "Backup current BCD files before update..."
              sudo mv "$syspath/EFI/Microsoft/Boot/BCD" "$syspath/EFI/BCD-BOOT"
              sudo mv "$syspath/EFI/Microsoft/Recovery/BCD" "$syspath/EFI/BCD-RECOVERY"
-             sudo rm -rf "$syspath/EFI/Microsoft" && copy_bootmgr "$winpath" "$syspath"
+             sudo rm -rf "$syspath/EFI/Microsoft" && copy_bootmgr "$winpath" "$syspath" "$firmware"
              echo "Restore current BCD files after update..."
              sudo mv "$syspath/EFI/BCD-BOOT" "$syspath/EFI/Microsoft/Boot/BCD"
              sudo mv "$syspath/EFI/BCD-RECOVERY" "$syspath/EFI/Microsoft/Recovery/BCD"
           fi
-          update_winload "$winpath" "$syspath" "$setfwmod" "$createbcd" "$prewbmdef" "$prodname" "$locale"
+          update_winload "$winpath" "$syspath" "$firmware" "$setfwmod" "$createbcd" "$prewbmdef" "$prodname" "$locale"
      fi
-     if [[ ! -f "$defbootpath" ]]; then
+     if ! sudo test -f "$defbootpath"; then
         echo "Copy bootmgfw.efi to default boot path..."
         sudo mkdir -p "$syspath"/EFI/BOOT
         sudo cp "$localwbmpath" "$defbootpath"
@@ -254,8 +297,86 @@ if   [[ "$firmware" == "uefi" ]]; then
         sudo umount "$syspath" && sudo rm -rf "$syspath"
      fi
 elif [[ "$firmware" == "bios" ]]; then
-     echo "Legacy booting not yet supported."
-     exit 1
+     if  [[ -z "$syspath" ]]; then
+         echo "Checking block devices for active partition (sudo required)..."
+         syspart=$(sudo sfdisk -o device,boot -l "$windisk" | grep -E '/dev/.*\*' | awk '{print $1}')
+         sysdisk="$windisk"
+         if [[ -z "$syspart" ]]; then
+            syspart=$(sudo sfdisk -o device,boot -l /dev/sda | grep -E '/dev/.*\*' | awk '{print $1}')
+            sysdisk="/dev/sda"
+         fi
+         if   [[ -z "$syspart" ]]; then
+              echo "No active partition on $windisk or /dev/sda."
+              exit 1
+         elif [[ "$syspart" == "sfdisk: gpt unknown column: boot" ]]; then
+              echo "Windows disk $windisk is using GPT partition scheme."
+              echo 'Use the "--firmware uefi" option or partition as MBR.'
+              exit 1
+         fi
+         syspath=$(lsblk -o path,mountpoint | grep "$syspart" | awk '{print $2}')
+         if [[ -z "${syspath// }" ]]; then
+            echo "Mounting active partition on $syspart"
+            sudo mkdir -p /mnt/winsys && sudo mount $syspart /mnt/winsys
+            syspath="/mnt/winsys"
+         fi
+     elif [[ ! -z "$syspath" && -d "$syspath" ]]; then
+          syspart=$(lsblk -o path,mountpoint | grep "$syspath" | awk '{print $1}')
+          sysdisk=$(printf "$syspart" | sed 's/[0-9]\+$//')
+     else
+          echo "Invalid system path please try again."
+          exit 1
+     fi
+     sysbtmgr="false"
+     sysuwfpath="$syspath/Boot/bootuwf.dll"
+     sysvhdpath="$syspath/Boot/bootvhd.dll"
+     localuwfpath="$winpath/Windows/Boot/PCAT/bootuwf.dll"
+     localvhdpath="$winpath/Windows/Boot/PCAT/bootvhd.dll"
+     sysfstype=$(lsblk -o path,fstype | grep "$syspart" | awk '{print $2}')
+     if   [[ -f "$localuwfpath" && -f "$localvhdpath" ]]; then
+          localuwfver=$(peres -v "$localuwfpath" | grep 'Product Version:' | awk '{print $3}')
+          localvhdver=$(peres -v "$localvhdpath" | grep 'Product Version:' | awk '{print $3}')
+     else
+          echo "Unable to find the BIOS boot files at $winpath"
+          exit 1
+     fi
+     if   sudo test -f "$sysuwfpath" && sudo test -f "$sysvhdpath"; then
+          sysuwfver=$(sudo peres -v "$sysuwfpath" | grep 'Product Version:' | awk '{print $3}')
+          sysvhdver=$(sudo peres -v "$sysvhdpath" | grep 'Product Version:' | awk '{print $3}')
+          sysbtmgr="true"
+     fi
+     if   ! sudo test -f "$sysuwfpath" && ! sudo test -f "$sysvhdpath"; then
+          copy_bootmgr "$winpath" "$syspath" "$firmware" "$sysfstype"
+          build_stores "$winpath" "$syspath" "$firmware" "$setfwmod" "$createbcd" "$prewbmdef" "$prodname" "$locale"
+     elif [[ "$sysbtmgr" == "true" && "$clean" == "true" ]]; then
+          echo "Remove current BCD store..."
+          sudo rm -f "$syspath"/Boot/BCD
+          if [[ "$sysuwfver" != "$localuwfver" || "$sysvhdver" != "$localvhdver" ]]; then
+             if [[ $(printf "$sysuwfver\n$localuwfver\n" | sort -rV | head -1) == "$localuwfver" ||
+                   $(printf "$sysvhdver\n$localvhdver\n" | sort -rV | head -1) == "$localvhdver" ]]; then
+                sudo rm -rf "$syspath/Boot" && sudo rm -f "$syspath/bootmgr $syspath/bootnxt"
+                copy_bootmgr "$winpath" "$syspath" "$firmware" "$sysfstype"
+             fi
+          fi
+          build_stores "$winpath" "$syspath" "$firmware" "$setfwmod" "$createbcd" "$prewbmdef" "$prodname" "$locale"
+     else
+          createbcd="false"
+          if [[ "$sysuwfver" != "$localuwfver" || "$sysvhdver" != "$localvhdver" ]]; then
+             if [[ $(printf "$sysuwfver\n$localuwfver\n" | sort -rV | head -1) == "$localuwfver" ||
+                   $(printf "$sysvhdver\n$localvhdver\n" | sort -rV | head -1) == "$localvhdver" ]]; then
+                echo "Backup current BCD store before update..."
+                sudo mv "$syspath/Boot/BCD" "$syspath"
+                sudo rm -rf "$syspath/Boot" && sudo rm -f "$syspath/bootmgr $syspath/bootnxt"
+                copy_bootmgr "$winpath" "$syspath" "$firmware" "$sysfstype"
+                echo "Restore current BCD store after update..."
+                sudo mv "$syspath/BCD" "$syspath/Boot"
+             fi
+          fi
+          update_winload "$winpath" "$syspath" "$firmware" "$setfwmod" "$createbcd" "$prewbmdef" "$prodname" "$locale"
+     fi
+     if [[ "$syspath" == "/mnt/winsys" ]]; then
+        echo "Removing temporary mount point..."
+        sudo umount "$syspath" && sudo rm -rf "$syspath"
+     fi
 elif [[ "$firmware" != "uefi" && "$firmware" != "bios" ]]; then
      echo "Unknown firmware: Only UEFI or BIOS."
      exit 1
