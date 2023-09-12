@@ -69,7 +69,6 @@ BCD-SYS has the following features and differences compared to bcdboot:
 - The system BCD-Template is ignored and a Windows10/11 equivalent is used.
 - The clean option will delete the existing configuration and create entries in new stores.
 - The boot files will be copied to a system partition on either the same or the first disk.
-- The firmware type is currently limited to UEFI until BIOS support is implemented.
 - The WBM firmware entry is always created in the first position when applicable.
 - The description can be specified when creating a new Windows entry.
 
@@ -77,5 +76,11 @@ BCD-SYS has the following features and differences compared to bcdboot:
 
 **libguestfs tools:** [hivexsh](https://www.libguestfs.org/hivexsh.1.html) and [hivexregedit](https://libguestfs.org/hivexregedit.1.html)
 
-**PE Utils:** [pev/peres](https://manpages.ubuntu.com/manpages/impish/man1/peres.1.html)
+**File Attributes:** [attr/setfattr](https://man7.org/linux/man-pages/man1/setfattr.1.html) and [fatattr](https://manpages.ubuntu.com/manpages/jammy/man1/fatattr.1.html)
+
+**PE Utils:** [pev/peres](https://manpages.ubuntu.com/manpages/jammy/man1/peres.1.html)
+
+**Legacy BIOS[^1]:** [ms-sys](https://github.com/jpz4085/ms-sys)
+
+[^1]: This is optional and not required if only using UEFI.
 
