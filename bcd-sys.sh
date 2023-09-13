@@ -227,6 +227,7 @@ if   [[ "$firmware" == "uefi" ]]; then
             syspath="/mnt/EFI"
          fi
      elif [[ ! -z "$syspath" && -d "$syspath" ]]; then
+          echo "Get block device for mount point (sudo required later)..."
           efipart=$(lsblk -o path,mountpoint | grep "$syspath" | awk '{print $1}')
           efidisk=$(printf "$efipart" | sed 's/[0-9]\+$//')
      else
@@ -249,12 +250,12 @@ if   [[ "$firmware" == "uefi" ]]; then
      elif ! sudo test -f "$syswbmpath"; then
           copy_bootmgr "$winpath" "$syspath" "$firmware"
           build_stores "$winpath" "$syspath" "$firmware" "$setfwmod" "$createbcd" "$prewbmdef" "$prodname" "$locale"
-          wbmoptnum=$(efibootmgr | grep "Windows Boot Manager" | awk '{print $1}' | sed 's/Boot0*//;s/\*//')
-          if [[ ! -z "$wbmoptnum" && "$setfwmod" == "false" ]]; then
-             echo "Remove the current Windows Boot Manager option..."
-             sudo efibootmgr -b "$wbmoptnum" -B > /dev/null
-          fi
-          if [[ "$setfwmod" == "false" ]]; then
+          if [[ "$setfwmod" == "false" && ! -z $(command -v efibootmgr) ]]; then
+             wbmoptnum=$(efibootmgr | grep "Windows Boot Manager" | awk '{print $1}' | sed 's/Boot0*//;s/\*//')
+             if [[ ! -z "$wbmoptnum" ]]; then
+                echo "Remove the current Windows Boot Manager option..."
+                sudo efibootmgr -b "$wbmoptnum" -B > /dev/null
+             fi
              echo "Add the Windows Boot Manager to the firmware..."
              efinum=$(printf "$efipart" | sed 's/.*[a-z]//')
              wbmpath="\\EFI\\Microsoft\\Boot\\bootmgfw.efi"
@@ -299,19 +300,22 @@ if   [[ "$firmware" == "uefi" ]]; then
 elif [[ "$firmware" == "bios" ]]; then
      if  [[ -z "$syspath" ]]; then
          echo "Checking block devices for active partition (sudo required)..."
-         syspart=$(sudo sfdisk -o device,boot -l "$windisk" | grep -E '/dev/.*\*' | awk '{print $1}')
-         sysdisk="$windisk"
-         if [[ -z "$syspart" ]]; then
-            syspart=$(sudo sfdisk -o device,boot -l /dev/sda | grep -E '/dev/.*\*' | awk '{print $1}')
-            sysdisk="/dev/sda"
-         fi
-         if   [[ -z "$syspart" ]]; then
-              echo "No active partition on $windisk or /dev/sda."
-              exit 1
-         elif [[ "$syspart" == "sfdisk: gpt unknown column: boot" ]]; then
+         syspart=$(sudo sfdisk -o device,boot -l "$windisk" 2>/dev/null | grep -E '/dev/.*\*' | awk '{print $1}')
+         errormsg=$(sudo sfdisk -o device,boot -l "$windisk" 2>&1>/dev/null)
+         if [[ "$errormsg" == "sfdisk: gpt unknown column: boot" ]]; then
               echo "Windows disk $windisk is using GPT partition scheme."
-              echo 'Use the "--firmware uefi" option or partition as MBR.'
-              exit 1
+         fi
+         if [[ -z "$syspart" ]]; then
+            syspart=$(sudo sfdisk -o device,boot -l /dev/sda 2>/dev/null | grep -E '/dev/.*\*' | awk '{print $1}')
+            errormsg=$(sudo sfdisk -o device,boot -l /dev/sda 2>&1>/dev/null)
+            if [[ "$errormsg" == "sfdisk: gpt unknown column: boot" ]]; then
+               echo "First block device (sda) is using GPT partition scheme."
+            fi
+         fi
+         if [[ -z "$syspart" ]]; then
+            echo "No active partition on $windisk or /dev/sda."
+            echo "Use the --syspath option to specify a volume."
+            exit 1
          fi
          syspath=$(lsblk -o path,mountpoint | grep "$syspart" | awk '{print $2}')
          if [[ -z "${syspath// }" ]]; then
@@ -322,6 +326,15 @@ elif [[ "$firmware" == "bios" ]]; then
      elif [[ ! -z "$syspath" && -d "$syspath" ]]; then
           syspart=$(lsblk -o path,mountpoint | grep "$syspath" | awk '{print $1}')
           sysdisk=$(printf "$syspart" | sed 's/[0-9]\+$//')
+          echo "Checking block device for active partition (sudo required)..."
+          actpart=$(sudo sfdisk -o device,boot -l "$sysdisk" | grep -E '/dev/.*\*' | awk '{print $1}')
+          if   [[ -z "$actpart" ]]; then
+               echo "No active partition on $sysdisk."
+               exit 1
+          elif [[ "$syspart" != "$actpart" ]]; then
+               echo "The volume $syspath on $syspart is not the active partition."
+               exit 1
+          fi
      else
           echo "Invalid system path please try again."
           exit 1
@@ -332,6 +345,11 @@ elif [[ "$firmware" == "bios" ]]; then
      localuwfpath="$winpath/Windows/Boot/PCAT/bootuwf.dll"
      localvhdpath="$winpath/Windows/Boot/PCAT/bootvhd.dll"
      sysfstype=$(lsblk -o path,fstype | grep "$syspart" | awk '{print $2}')
+     if [[ "$sysfstype" != "vfat" && "$sysfstype" != "ntfs" ]]; then
+        echo "Active partition $syspart is $sysfstype format."
+        echo "System partition must be FAT or NTFS format."
+        exit 1
+     fi
      if   [[ -f "$localuwfpath" && -f "$localvhdpath" ]]; then
           localuwfver=$(peres -v "$localuwfpath" | grep 'Product Version:' | awk '{print $3}')
           localvhdver=$(peres -v "$localvhdpath" | grep 'Product Version:' | awk '{print $3}')
