@@ -25,22 +25,25 @@ bcd-sys /media/user/mountpoint
 ```
 bcd-sys /media/user/mountpoint -s /media/user/volname
 ```
+##### Specify both UEFI and BIOS firmware
+
+```
+bcd-sys -f both /media/user/mountpoint
+```
 ##### Specify a custom description
 
 ```
 bcd-sys /media/user/mountpoint -n Windows\ 11\ Professional
 ```
-
 ##### Specify the locale parameter
 
 ```
-bcd-sys /media/user/mountpoint -l en-us
+bcd-sys -l en-us /media/user/mountpoint
 ```
-
 ##### Remove existing stores and create new entries
 
 ```
-bcd-sys /media/user/mountpoint -c
+bcd-sys -c /media/user/mountpoint
 ```
 
 ## Installation
