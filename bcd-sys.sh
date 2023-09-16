@@ -308,7 +308,7 @@ if [[ "$firmware" == "uefi" || "$firmware" == "both" ]]; then
    localwbmpath="$winpath/Windows/Boot/EFI/bootmgfw.efi"
    efifstype=$(lsblk -o path,fstype | grep "$efipart" | awk '{print $2}')
    if [[ "$efifstype" != "vfat" ]]; then
-      echo -e "${BGTYELLOW}Partition at $efipart is $efifstype format.${NC}"
+      echo "Partition at $efipart is $efifstype format."
       if  [[ "$efifstype" == "ntfs" ]]; then
           echo -e "${BGTYELLOW}Disk may not be UEFI bootable on all systems.${NC}"
       else
@@ -380,77 +380,78 @@ if [[ "$firmware" == "uefi" || "$firmware" == "both" ]]; then
       cleanup
    fi
 fi
-if   [[ "$firmware" == "bios" || "$firmware" == "both" ]]; then
-     if  [[ -z "$syspath" ]]; then
-         get_syspath "$firmware" "$windisk"
-     elif [[ ! -z "$syspath" && -d "$syspath" ]]; then
-          if [[ "$firmware" == "bios" ]]; then
-             get_device "$firmware" "$syspath"
-          fi
-     else
-          echo -e "${RED}Invalid system path please try again.${NC}"
-          exit 1
-     fi
-     fwmode="bios"
-     sysbtmgr="false"
-     sysuwfpath="$syspath/Boot/bootuwf.dll"
-     sysvhdpath="$syspath/Boot/bootvhd.dll"
-     localuwfpath="$winpath/Windows/Boot/PCAT/bootuwf.dll"
-     localvhdpath="$winpath/Windows/Boot/PCAT/bootvhd.dll"
-     sysfstype=$(lsblk -o path,fstype | grep "$syspart" | awk '{print $2}')
-     if [[ "$sysfstype" != "vfat" && "$sysfstype" != "ntfs" ]]; then
-        echo -e "${RED}Active partition $syspart is $sysfstype format.${NC}"
-        echo "System partition must be FAT or NTFS format."
+if [[ "$firmware" == "bios" || "$firmware" == "both" ]]; then
+   if  [[ -z "$syspath" ]]; then
+       get_syspath "$firmware" "$windisk"
+   elif [[ ! -z "$syspath" && -d "$syspath" ]]; then
+        if [[ "$firmware" == "bios" ]]; then
+           get_device "$firmware" "$syspath"
+        fi
+   else
+        echo -e "${RED}Invalid system path please try again.${NC}"
         exit 1
-     fi
-     if   [[ -f "$localuwfpath" && -f "$localvhdpath" ]]; then
-          localuwfver=$(peres -v "$localuwfpath" | grep 'Product Version:' | awk '{print $3}')
-          localvhdver=$(peres -v "$localvhdpath" | grep 'Product Version:' | awk '{print $3}')
-     else
-          echo -e "${RED}Unable to find the BIOS boot files at $winpath${NC}"
-          exit 1
-     fi
-     if   sudo test -f "$sysuwfpath" && sudo test -f "$sysvhdpath"; then
-          sysuwfver=$(sudo peres -v "$sysuwfpath" | grep 'Product Version:' | awk '{print $3}')
-          sysvhdver=$(sudo peres -v "$sysvhdpath" | grep 'Product Version:' | awk '{print $3}')
-          sysbtmgr="true"
-     fi
-     if   ! sudo test -f "$sysuwfpath" && ! sudo test -f "$sysvhdpath"; then
-          copy_bootmgr "$winpath" "$syspath" "$fwmode" "$sysfstype"
-          build_stores "$winpath" "$syspath" "$fwmode" "$setfwmod" "$createbcd" "$prewbmdef" "$prodname" "$locale"
-     elif [[ "$sysbtmgr" == "true" && "$clean" == "true" ]]; then
-          echo "Remove current BCD store..."
-          sudo rm -f "$syspath"/Boot/BCD
-          if [[ "$sysuwfver" != "$localuwfver" || "$sysvhdver" != "$localvhdver" ]]; then
-             if [[ $(printf "$sysuwfver\n$localuwfver\n" | sort -rV | head -1) == "$localuwfver" ||
-                   $(printf "$sysvhdver\n$localvhdver\n" | sort -rV | head -1) == "$localvhdver" ]]; then
-                sudo rm -rf "$syspath/Boot" && sudo rm -f "$syspath/bootmgr $syspath/bootnxt"
-                copy_bootmgr "$winpath" "$syspath" "$fwmode" "$sysfstype"
-             fi
-          fi
-          build_stores "$winpath" "$syspath" "$fwmode" "$setfwmod" "$createbcd" "$prewbmdef" "$prodname" "$locale"
-     else
-          createbcd="false"
-          if [[ "$sysuwfver" != "$localuwfver" || "$sysvhdver" != "$localvhdver" ]]; then
-             if [[ $(printf "$sysuwfver\n$localuwfver\n" | sort -rV | head -1) == "$localuwfver" ||
-                   $(printf "$sysvhdver\n$localvhdver\n" | sort -rV | head -1) == "$localvhdver" ]]; then
-                echo "Backup current BCD store before update..."
-                sudo mv "$syspath/Boot/BCD" "$syspath"
-                sudo rm -rf "$syspath/Boot" && sudo rm -f "$syspath/bootmgr $syspath/bootnxt"
-                copy_bootmgr "$winpath" "$syspath" "$fwmode" "$sysfstype"
-                echo "Restore current BCD store after update..."
-                sudo mv "$syspath/BCD" "$syspath/Boot"
-             fi
-          fi
-          update_winload "$winpath" "$syspath" "$fwmode" "$setfwmod" "$createbcd" "$prewbmdef" "$prodname" "$locale"
-     fi
-     if [[ "$syspath" == "/mnt/winsys" ]]; then
-        echo "Removing temporary mount point..."
-        sudo umount "$syspath" && sudo rm -rf "$syspath"
-     fi
-else
-     echo -e "${RED}Unknown firmware: Only UEFI and BIOS.${NC}"
-     exit 1
+   fi
+   fwmode="bios"
+   sysbtmgr="false"
+   sysuwfpath="$syspath/Boot/bootuwf.dll"
+   sysvhdpath="$syspath/Boot/bootvhd.dll"
+   localuwfpath="$winpath/Windows/Boot/PCAT/bootuwf.dll"
+   localvhdpath="$winpath/Windows/Boot/PCAT/bootvhd.dll"
+   sysfstype=$(lsblk -o path,fstype | grep "$syspart" | awk '{print $2}')
+   if [[ "$sysfstype" != "vfat" && "$sysfstype" != "ntfs" ]]; then
+      echo "Active partition $syspart is $sysfstype format."
+      echo -e "${RED}System partition must be FAT or NTFS format.${NC}"
+      exit 1
+   fi
+   if   [[ -f "$localuwfpath" && -f "$localvhdpath" ]]; then
+        localuwfver=$(peres -v "$localuwfpath" | grep 'Product Version:' | awk '{print $3}')
+        localvhdver=$(peres -v "$localvhdpath" | grep 'Product Version:' | awk '{print $3}')
+   else
+        echo -e "${RED}Unable to find the BIOS boot files at $winpath${NC}"
+        exit 1
+   fi
+   if   sudo test -f "$sysuwfpath" && sudo test -f "$sysvhdpath"; then
+        sysuwfver=$(sudo peres -v "$sysuwfpath" | grep 'Product Version:' | awk '{print $3}')
+        sysvhdver=$(sudo peres -v "$sysvhdpath" | grep 'Product Version:' | awk '{print $3}')
+        sysbtmgr="true"
+   fi
+   if   ! sudo test -f "$sysuwfpath" && ! sudo test -f "$sysvhdpath"; then
+        copy_bootmgr "$winpath" "$syspath" "$fwmode" "$sysfstype"
+        build_stores "$winpath" "$syspath" "$fwmode" "$setfwmod" "$createbcd" "$prewbmdef" "$prodname" "$locale"
+   elif [[ "$sysbtmgr" == "true" && "$clean" == "true" ]]; then
+        echo "Remove current BCD store..."
+        sudo rm -f "$syspath"/Boot/BCD
+        if [[ "$sysuwfver" != "$localuwfver" || "$sysvhdver" != "$localvhdver" ]]; then
+           if [[ $(printf "$sysuwfver\n$localuwfver\n" | sort -rV | head -1) == "$localuwfver" ||
+                 $(printf "$sysvhdver\n$localvhdver\n" | sort -rV | head -1) == "$localvhdver" ]]; then
+              sudo rm -rf "$syspath/Boot" && sudo rm -f "$syspath/bootmgr $syspath/bootnxt"
+              copy_bootmgr "$winpath" "$syspath" "$fwmode" "$sysfstype"
+           fi
+        fi
+        build_stores "$winpath" "$syspath" "$fwmode" "$setfwmod" "$createbcd" "$prewbmdef" "$prodname" "$locale"
+   else
+        createbcd="false"
+        if [[ "$sysuwfver" != "$localuwfver" || "$sysvhdver" != "$localvhdver" ]]; then
+           if [[ $(printf "$sysuwfver\n$localuwfver\n" | sort -rV | head -1) == "$localuwfver" ||
+                 $(printf "$sysvhdver\n$localvhdver\n" | sort -rV | head -1) == "$localvhdver" ]]; then
+              echo "Backup current BCD store before update..."
+              sudo mv "$syspath/Boot/BCD" "$syspath"
+              sudo rm -rf "$syspath/Boot" && sudo rm -f "$syspath/bootmgr $syspath/bootnxt"
+              copy_bootmgr "$winpath" "$syspath" "$fwmode" "$sysfstype"
+              echo "Restore current BCD store after update..."
+              sudo mv "$syspath/BCD" "$syspath/Boot"
+           fi
+        fi
+        update_winload "$winpath" "$syspath" "$fwmode" "$setfwmod" "$createbcd" "$prewbmdef" "$prodname" "$locale"
+   fi
+   if [[ "$syspath" == "/mnt/winsys" ]]; then
+      echo "Removing temporary mount point..."
+      sudo umount "$syspath" && sudo rm -rf "$syspath"
+   fi
+fi
+if [[ "$firmware" != "uefi" && "$firmware" != "bios" && "$firmware" != "both" ]]; then
+   echo -e "${RED}Unknown firmware: Only UEFI and BIOS.${NC}"
+   exit 1
 fi
 
 cleanup
