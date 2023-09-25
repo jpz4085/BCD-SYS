@@ -9,6 +9,7 @@ if   [[ "$1" == "install" ]]; then
      install -m 755 bcd-sys.sh $bindir/bcd-sys
      install -m 755 recovery.sh $resdir
      install -m 755 update_device.sh $resdir
+     install -m 755 wbmfwvar.sh $resdir
      install -m 755 winload.sh $resdir
      cp -r Templates $resdir
      echo "Update script and template paths..."

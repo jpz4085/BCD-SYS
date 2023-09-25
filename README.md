@@ -30,6 +30,11 @@ bcd-sys /media/user/mountpoint -s /media/user/volname
 ```
 bcd-sys -f both /media/user/mountpoint
 ```
+##### Add the WBM to the end of the UEFI boot order
+
+```
+bcd-sys -e /media/user/mountpoint
+```
 ##### Specify a custom description
 
 ```
@@ -72,7 +77,8 @@ BCD-SYS has the following features and differences compared to bcdboot:
 - The system BCD-Template is ignored and a Windows10/11 equivalent is used.
 - The clean option will delete the existing configuration and create entries in new stores.
 - The boot files will be copied to a system partition on either the same or the first disk.
-- The WBM firmware entry is always created in the first position when applicable.
+- The position of the WBM entry in the UEFI boot order will be preserved when updating  
+  an existing BCD. A new entry will only be created if missing or creating new stores.
 - The description can be specified when creating a new Windows entry.
 
 ## Requirements
