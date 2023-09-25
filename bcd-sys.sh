@@ -4,6 +4,7 @@ firmware=$(test -d /sys/firmware/efi && echo uefi || echo bios)
 setfwmod="false"
 createbcd="true"
 prewbmdef="false"
+setwbmlast="false"
 locale="en-us"
 clean="false"
 resdir="."
@@ -28,6 +29,11 @@ echo "                 this will be ignored when creating a new BCD store."
 echo "-n, --prodname	 Specify the display name for the new OS entry"
 echo "              	 otherwise use the product name from the registry."
 echo "-l, --locale	 Specify the locale parameter. (Default is en-us)"
+echo "-e, --addtoend   Add the Windows Boot Manager to the end of the"
+echo "                 UEFI boot order otherwise it will be added first"
+echo "                 when missing or creating new BCD stores. The WBM"
+echo "                 position will be preserved by default when updating"
+echo "                 existing BCD hives if already present."
 echo "-c, --clean	 Remove existing BCD stores and create new entries."
 echo "-h, --help	 Display this help message."
 echo
@@ -224,9 +230,19 @@ elif [[ "$firmware" == "bios" || "$firmware" == "both" ]]; then
 fi
 }
 
+get_wbmoption () {
+wbmoptnum=$(efibootmgr | grep "Windows Boot Manager" | awk '{print $1}' | sed 's/Boot//;s/\*//')
+}
+
+create_wbmfwvar () {
+echo "Update main BCD with current WBM firmware variable..."
+$resdir/wbmfwvar.sh $1 > $tmpdir/wbmfwvar.txt
+sudo hivexsh -w "$2/EFI/Microsoft/Boot/BCD" -f $tmpdir/wbmfwvar.txt
+}
+
 cleanup () {
 echo "Clean up temporary files..."
-rm -f $tmpdir/winload.txt $tmpdir/recovery.txt $tmpdir/BCD-Windows $tmpdir/BCD-Recovery
+rm -f $tmpdir/winload.txt $tmpdir/recovery.txt $tmpdir/wbmfwvar.txt $tmpdir/BCD-Windows $tmpdir/BCD-Recovery
 }
 
 if [[ $(uname) != "Linux" ]]; then echo "Unsupported platform detected."; exit 1; fi
@@ -238,6 +254,7 @@ if [[ -z $(command -v hivexregedit) ]]; then missing+=" hivexregedit"; fi
 if [[ -z $(command -v setfattr) ]]; then missing+=" attr/setfattr"; fi
 if [[ -z $(command -v fatattr) ]]; then missing+=" fatattr"; fi
 if [[ -z $(command -v peres) ]]; then missing+=" pev/peres"; fi
+if [[ -z $(command -v xxd) ]]; then missing+=" xxd"; fi
 if [[ ! -z "$missing" ]]; then
    echo "The following packages are required:""$missing"
    exit 1
@@ -271,6 +288,10 @@ while (( "$#" )); do
 	       shift
 	       locale="$1"
 	       locale=${locale,,}
+	       shift
+	       ;;
+	    -e | --addtoend )
+	       setwbmlast="true"
 	       shift
 	       ;;
 	    -c | --clean )
@@ -309,6 +330,7 @@ else
             exit 1
        fi
        fwmode="uefi"
+       efibootvars="false"
        defbootpath="$syspath/EFI/BOOT/BOOTX64.efi"
        syswbmpath="$syspath/EFI/Microsoft/Boot/bootmgfw.efi"
        localwbmpath="$winpath/Windows/Boot/EFI/bootmgfw.efi"
@@ -329,22 +351,30 @@ else
           syswbmver=$(sudo peres -v "$syswbmpath" | grep 'Product Version:' | awk '{print $3}')
           localwbmver=$(peres -v "$localwbmpath" | grep 'Product Version:' | awk '{print $3}')
        fi
+       if [[ ! -z $(command -v efibootmgr) ]]; then
+          get_wbmoption && efibootvars="true"
+          efinum=$(printf "$efipart" | sed 's/.*[a-z]//')
+          wbmefipath="\\EFI\\Microsoft\\Boot\\bootmgfw.efi"
+       fi
        if   [[ ! -f "$localwbmpath" ]]; then
             echo -e "${RED}Unable to find the EFI boot files at $winpath${NC}"
             exit 1
        elif ! sudo test -f "$syswbmpath"; then
             copy_bootmgr "$winpath" "$syspath" "$fwmode"
             build_stores "$winpath" "$syspath" "$fwmode" "$setfwmod" "$createbcd" "$prewbmdef" "$prodname" "$locale"
-            if [[ "$setfwmod" == "false" && ! -z $(command -v efibootmgr) ]]; then
-               wbmoptnum=$(efibootmgr | grep "Windows Boot Manager" | awk '{print $1}' | sed 's/Boot0*//;s/\*//')
+            if [[ "$setfwmod" == "false" && "$efibootvars" == "true" ]]; then
                if [[ ! -z "$wbmoptnum" ]]; then
                   echo "Remove the current Windows Boot Manager option..."
                   sudo efibootmgr -b "$wbmoptnum" -B > /dev/null
                fi
                echo "Add the Windows Boot Manager to the firmware..."
-               efinum=$(printf "$efipart" | sed 's/.*[a-z]//')
-               wbmpath="\\EFI\\Microsoft\\Boot\\bootmgfw.efi"
-               sudo efibootmgr -c -d "$efidisk" -p "$efinum" -l "$wbmpath" -L "Windows Boot Manager" -@ $resdir/Templates/wbmoptdata.bin > /dev/null
+               sudo efibootmgr -c -d "$efidisk" -p "$efinum" -l "$wbmefipath" -L "Windows Boot Manager" -@ $resdir/Templates/wbmoptdata.bin > /dev/null
+               get_wbmoption && create_wbmfwvar "$wbmoptnum" "$syspath"
+               if [[ "$setwbmlast" == "true" ]]; then
+                  bootorder=$(efibootmgr | grep BootOrder: | awk '{print $2}' | sed "s/$wbmoptnum,//")
+                  bootorder+=",$wbmoptnum"
+                  sudo efibootmgr -o "$bootorder" > /dev/null
+               fi
             fi
        elif sudo test -f "$syswbmpath" && [[ "$clean" == "true" ]]; then
             echo "Remove current main and recovery BCD stores..."
@@ -357,6 +387,19 @@ else
                sudo rm -rf "$syspath/EFI/Microsoft" && copy_bootmgr "$winpath" "$syspath" "$fwmode"
             fi
             build_stores "$winpath" "$syspath" "$fwmode" "$setfwmod" "$createbcd" "$prewbmdef" "$prodname" "$locale"
+            if [[ "$setfwmod" == "false" && "$efibootvars" == "true" ]]; then
+               if [[ -z "$wbmoptnum" ]]; then
+                  echo "Add the Windows Boot Manager to the firmware..."
+                  sudo efibootmgr -c -d "$efidisk" -p "$efinum" -l "$wbmefipath" -L "Windows Boot Manager" -@ $resdir/Templates/wbmoptdata.bin > /dev/null
+                  get_wbmoption
+                  if [[ "$setwbmlast" == "true" ]]; then
+                     bootorder=$(efibootmgr | grep BootOrder: | awk '{print $2}' | sed "s/$wbmoptnum,//")
+                     bootorder+=",$wbmoptnum"
+                     sudo efibootmgr -o "$bootorder" > /dev/null
+                  fi
+               fi
+               create_wbmfwvar "$wbmoptnum" "$syspath"
+            fi
        else
             createbcd="false"
             if [[ "$syswbmver" != "$localwbmver" && $(printf "$syswbmver\n$localwbmver\n" | sort -rV | head -1) == "$localwbmver" ]]; then
@@ -370,6 +413,16 @@ else
                sudo mv "$syspath/EFI/BCD-RECOVERY" "$syspath/EFI/Microsoft/Recovery/BCD"
             fi
             update_winload "$winpath" "$syspath" "$fwmode" "$setfwmod" "$createbcd" "$prewbmdef" "$prodname" "$locale"
+            if [[ "$setfwmod" == "false" && "$efibootvars" == "true" && -z "$wbmoptnum" ]]; then
+               echo "Add the Windows Boot Manager to the firmware..."
+               sudo efibootmgr -c -d "$efidisk" -p "$efinum" -l "$wbmefipath" -L "Windows Boot Manager" -@ $resdir/Templates/wbmoptdata.bin > /dev/null
+               get_wbmoption && create_wbmfwvar "$wbmoptnum" "$syspath"
+               if [[ "$setwbmlast" == "true" ]]; then
+                  bootorder=$(efibootmgr | grep BootOrder: | awk '{print $2}' | sed "s/$wbmoptnum,//")
+                  bootorder+=",$wbmoptnum"
+                  sudo efibootmgr -o "$bootorder" > /dev/null
+               fi
+            fi
        fi
        if ! sudo test -f "$defbootpath"; then
           echo "Copy bootmgfw.efi to default boot path..."
