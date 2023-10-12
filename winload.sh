@@ -14,7 +14,6 @@ else
 fi
 }
 
-sourcepath="$1"
 destpath="$2"
 firmware="$3"
 setfwmod="$4"
@@ -22,6 +21,17 @@ createbcd="$5"
 prewbmdef="$6"
 prodname="$7"
 locale="$8"
+verbose="$9"
+virtual="${10}"
+
+if  [[ "$virtual" == "true" ]]; then
+    winvhdpath="$1"
+    sourcepath="${11}"
+    imgstring="${12}"
+else
+    sourcepath="$1"
+fi
+
 resdir="."
 winresguid=$(gen_uuid)
 winldrguid=$(gen_uuid)
@@ -30,6 +40,11 @@ namescript="cd Microsoft\Windows NT\CurrentVersion\nlsval ProductName\nunload\n"
 ordscript="cd Objects\\{9dea862c-5cdd-4e70-acc1-f32b344d4795}\\\Elements\\\24000001\nlsval\nunload\n"
 locscript="cd Objects\\{9dea862c-5cdd-4e70-acc1-f32b344d4795}\\\Elements\\\12000005\nlsval Element\nunload\n"
 winproduct=$(printf "$namescript" | hivexsh "$softhivepath" | cut -d' ' -f 1,2)
+
+if [[ "$verbose" == "true" ]]; then
+   echo "Loader GUID: {"$winldrguid"}" 1>&2
+   echo "Resume GUID: {"$winresguid"}" 1>&2
+fi
 
 if   [[ "$firmware" == "uefi" ]]; then
      mainbcdpath="$destpath/EFI/Microsoft/Boot/BCD"
@@ -66,7 +81,11 @@ printf "add 11000001\n"
 printf "cd 11000001\n"
 printf "setval 1\n"
 printf "Element\n"
-$resdir/update_device.sh "$sourcepath"
+if  [[ "$virtual" == "true" ]]; then
+    $resdir/update_device.sh "$sourcepath" "$winvhdpath" "$imgstring"
+else
+    $resdir/update_device.sh "$sourcepath"
+fi
 printf "cd ..\n"
 printf "add 12000002\n"
 printf "cd 12000002\n"
@@ -110,7 +129,11 @@ printf "add 21000001\n"
 printf "cd 21000001\n"
 printf "setval 1\n"
 printf "Element\n"
-$resdir/update_device.sh "$sourcepath"
+if  [[ "$virtual" == "true" ]]; then
+    $resdir/update_device.sh "$sourcepath" "$winvhdpath" "$imgstring"
+else
+    $resdir/update_device.sh "$sourcepath"
+fi
 printf "cd ..\n"
 printf "add 22000002\n"
 printf "cd 22000002\n"
@@ -148,7 +171,11 @@ printf "add 11000001\n"
 printf "cd 11000001\n"
 printf "setval 1\n"
 printf "Element\n"
-$resdir/update_device.sh "$sourcepath"
+if  [[ "$virtual" == "true" ]]; then
+    $resdir/update_device.sh "$sourcepath" "$winvhdpath" "$imgstring"
+else
+    $resdir/update_device.sh "$sourcepath"
+fi
 printf "cd ..\n"
 printf "add 12000002\n"
 printf "cd 12000002\n"
@@ -196,7 +223,11 @@ printf "add 21000001\n"
 printf "cd 21000001\n"
 printf "setval 1\n"
 printf "Element\n"
-$resdir/update_device.sh "$sourcepath"
+if  [[ "$virtual" == "true" ]]; then
+    $resdir/update_device.sh "$sourcepath" "$winvhdpath" "$imgstring"
+else
+    $resdir/update_device.sh "$sourcepath"
+fi
 printf "cd ..\n"
 printf "add 22000002\n"
 printf "cd 22000002\n"
