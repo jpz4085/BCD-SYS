@@ -30,45 +30,8 @@ exit 1
 help () {
 echo "Usage: $(basename $0) <source> [options] <system>"
 echo
-echo "Configure the boot environment for a Windows installation."
+cat $resdir/Resources/help-page.txt
 echo
-echo "Options:"
-echo
-echo "<source>      	 Mount point of the Windows partition or path to"
-echo "              	 a virtual disk (VHDX) file containing a Windows"
-echo "              	 image. A list of partitions on the virtual disk"
-echo "              	 will be displayed to assist making a selection."
-echo "-f, --firmware	 Specify the firmware type as UEFI, BIOS or BOTH."
-echo "-s, --syspath	 Mount point of the system partition. (Optional)"
-echo "-d, --wbmdefault Preserve the existing default entry in {bootmgr}"
-echo "                 this will be ignored when creating a new BCD store."
-echo "-n, --prodname	 Specify the display name for the new OS entry"
-echo "              	 otherwise use the product name from the registry."
-echo "-l, --locale	 Specify the locale parameter. (Default is en-us)"
-echo "-e, --addtoend   Add the Windows Boot Manager to the end of the"
-echo "                 UEFI boot order otherwise it will be added first"
-echo "                 when missing or creating new BCD stores. The WBM"
-echo "                 position will be preserved by default when updating"
-echo "                 existing BCD hives if already present."
-echo "-v, --verbose    Display progress for all steps in the configuration"
-echo "                 process and show loader/resume GUIDs of new entry."
-echo "-c, --clean	 Remove existing BCD stores and create new entries."
-echo "-h, --help	 Display this help message."
-echo
-echo "This script will copy the boot files, if missing or outdated, from"
-echo "the Windows installation located at <source> to a system partition"
-echo "on either the same drive or the first drive (/dev/sda) whichever"
-echo "exists. Alternatively a volume mounted at <system> can be specified"
-echo "using the --syspath option. Any duplicate objects will be deleted"
-echo "from an existing BCD when creating new entries. The system template"
-echo "at Windows/System32/config/BCD-Template is currently ignored."
-echo
-echo "The default firmware type is the same type running under Linux. UEFI"
-echo "is supported on GPT and MBR disks while BIOS or BOTH requires legacy"
-echo "bootable MBR partitions with boot sectors created using a tool like"
-echo "ms-sys. The Windows Boot Manager will be added to the UEFI firmware"
-echo "boot menu except when using the --syspath option which must rely on"
-echo "the default path at /EFI/BOOT/BOOTX64.efi"
 exit
 }
 

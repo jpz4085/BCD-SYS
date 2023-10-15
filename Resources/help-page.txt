@@ -1,0 +1,42 @@
+Configure the boot environment for a Windows installation.
+
+Options:
+
+<source>      	 Mount point of the Windows partition or path to
+               	 a virtual disk (VHDX) file containing a Windows
+               	 image. A list of partitions on the virtual disk
+               	 will be displayed to assist making a selection.
+-f, --firmware	 Specify the firmware type as UEFI, BIOS or BOTH.
+-s, --syspath	 Mount point of the system partition. (Optional)
+-d, --wbmdefault Preserve the existing default entry in {bootmgr}
+                 this will be ignored when creating a new BCD store.
+-n, --prodname	 Specify the display name for the new OS entry
+               	 otherwise use the product name from the registry.
+-l, --locale	 Specify the locale parameter. (Default is en-us)
+-e, --addtoend   Add the Windows Boot Manager to the end of the
+                 UEFI boot order otherwise it will be added first
+                 when missing or creating new BCD stores. The WBM
+                 position will be preserved by default when updating
+                 existing BCD hives if already present.
+-v, --verbose    Display progress for all steps in the configuration
+                 process and show loader/resume GUIDs of new entry.
+-c, --clean	 Remove existing BCD stores and create new entries.
+-h, --help	 Display this help message.
+
+This script will copy the boot files, if missing or outdated, from
+the Windows installation located at <source> to a system partition
+on either the same drive or the first drive (/dev/sda) whichever
+exists. Alternatively a volume mounted at <system> can be specified
+using the --syspath option. Any duplicate objects will be deleted
+from an existing BCD when creating new entries. The system template
+at Windows/System32/config/BCD-Template is currently ignored.
+
+The default firmware type is the same type running under Linux. UEFI
+is supported on GPT and MBR disks while BIOS or BOTH requires legacy
+bootable MBR partitions with boot sectors created using a tool like
+ms-sys. The Windows Boot Manager will be added to the UEFI firmware
+boot menu except when using the --syspath option which must rely on
+the default path at /EFI/BOOT/BOOTX64.efi
+
+Read "Windows VHDX Native Boot.txt" under the Resources folder for
+instructions on setting up a Windows installation on a virtual disk.
