@@ -1,0 +1,32 @@
+Create a Windows VHDX Boot Entry on Linux
+-----------------------------------------
+
+1. Create an empty virtual disk using the qemu-img utility.
+   a. qemu-img create -f vhdx -o block_state_zero=off,subformat=fixed windows.vhdx <size>
+   
+2. Attach the virtual disk to a network block device.
+   b. attach-vhdx windows.vhdx
+   
+3. Partition as a single NTFS volume and format using the fdisk geometry.
+   c. sudo fdisk /dev/nbd#
+   d. sudo fdisk -l -u=cylinders /dev/nbd#
+   e. sudo mkntfs -Q -L "Windows VHD" -p <start_sector> -H <fdisk_heads> -S <fdisk_sectors/track> /dev/nbd#p#
+   
+4. Mount the Windows install DVD and examine the index list.
+   f. wiminfo /media/$USER/<Win_DVD_Label>/sources/install.wim
+   
+5. Apply a Windows install image to the block device.
+   g. sudo wimapply /media/$USER/<Win_DVD_Label>/sources/install.wim <index> /dev/nbd#p#
+   
+6. Mount the virtual disk, view its contents to confirm success, then unmount it.
+
+7. Detach the virtual disk from the network block device.
+   h. detach-vhdx /dev/nbd#
+   
+8. Create or update the Windows boot files.
+   i. bcd-sys windows.vhdx
+   
+NOTES:
+
+i.  The steps above are to be performed on a physical disk with an NTFS volume for the VHDX files. A system partition on the same disk is recommended.
+ii. Partitioning and formatting of physical media and virtual disks is recommended to be performed under Linux.
