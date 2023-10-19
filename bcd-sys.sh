@@ -17,6 +17,7 @@ RED='\033[1;31m'
 BGTYELLOW='\033[1;93m'
 NC='\033[0m' # No Color
 
+# Show basic usage.
 usage () {
 echo "Usage: $(basename $0) <source> [options] <system>"
 echo
@@ -27,6 +28,7 @@ echo "-h, --help        Display full usage information."
 exit 1
 }
 
+# Show full help.
 help () {
 echo "Usage: $(basename $0) <source> [options] <system>"
 echo
@@ -35,6 +37,7 @@ echo
 exit
 }
 
+# Remove existing boot loader and resume entries for matching device (11000001).
 remove_duplicates () {
 if   [[ "$3" == "uefi" ]]; then
      bcdpath="$2/EFI/Microsoft/Boot/BCD"
@@ -74,6 +77,7 @@ do
 done
 }
 
+# Build main and recovery stores using blank BCD-NEW file and reg templates.
 build_stores () {
 if [[ "$verbose" == "true" ]]; then echo "Build the main BCD store..."; fi
 $resdir/winload.sh "$1" "$2" "$3" "$4" "$5" "$6" "$7" "$8" "$9" "${10}" "${11}" "${12}" > $tmpdir/winload.txt
@@ -95,6 +99,7 @@ elif [[ "$3" == "bios" ]]; then
 fi
 }
 
+# Build new Windows entry and update existing BCD stores.
 update_winload () {
 remove_duplicates "$1" "$2" "$3" "${11}" "${12}"
 if [[ "$verbose" == "true" ]]; then echo "Update main BCD hive with new entries..."; fi
@@ -109,6 +114,7 @@ elif [[ "$3" == "bios" ]]; then
 fi
 }
 
+# Copy the WBM files for the specified firmware and set the file attributes the same as bcdboot.
 copy_bootmgr () {
 if   [[ "$3" == "uefi" ]]; then
      if [[ "$verbose" == "true" ]]; then echo "Copy the EFI boot files to the ESP..."; fi
@@ -137,6 +143,8 @@ elif [[ "$3" == "bios" ]]; then
 fi
 }
 
+# Used when no syspath is specified in the arguments.
+# Look for an ESP or active primary partition on the Windows disk or the first disk (/dev/sda).
 get_syspath () {
 firmware="$1"
 windisk="$2"
@@ -196,6 +204,8 @@ elif [[ "$firmware" == "bios" || "$firmware" == "both" ]]; then
 fi
 }
 
+# Used when a syspath is provided in the arguments.
+# Find the block device (and active partition if BIOS/BOTH) for the specified mount point.
 get_device () {
 firmware="$1"
 syspath="$2"
@@ -223,6 +233,7 @@ elif [[ "$firmware" == "bios" || "$firmware" == "both" ]]; then
 fi
 }
 
+# Load the NBD module if needed then find a free block device to use.
 attach_vdisk () {
 errormsg=$(modinfo nbd 2>&1>/dev/null)
 if [[ -z $(command -v qemu-nbd) ]]; then missing+=" qemu-utils"; fi
@@ -243,6 +254,7 @@ done
 sudo qemu-nbd -c "$vrtdisk" "$imgpath"
 }
 
+# Display partitions on virtual disk and mount the specified volume.
 mount_vpart () {
 vrtpath="/mnt/virtwin"
 mntopts="rw,nosuid,nodev,relatime,uid=$(id -u),gid=$(id -g),iocharset=utf8,windows_names"
@@ -258,6 +270,7 @@ done
 sudo mkdir -p "$vrtpath" && sudo mount -t ntfs3 -o"$mntopts" /dev/$vtwinpart "$vrtpath"
 }
 
+# Unmount volume and detach virtual disk then unload NBD module if no longer needed.
 umount_vpart () {
 if [[ "$verbose" == "true" ]]; then echo "Removing temporary VHDX mount point..."; fi
 sudo umount "$vrtpath" && sudo rm -rf "$vrtpath"
@@ -268,16 +281,19 @@ if [[ "$unloadnbd" == "true" ]]; then
 fi
 }
 
+# Check for the WBM in the current firmware boot options.
 get_wbmoption () {
 wbmoptnum=$(efibootmgr | grep "Windows Boot Manager" | awk '{print $1}' | sed 's/Boot//;s/\*//')
 }
 
+# Update the WBM firmware option and device data in the BCD entry.
 create_wbmfwvar () {
 if [[ "$verbose" == "true" ]]; then echo "Update main BCD with current WBM firware variable..."; fi
 $resdir/wbmfwvar.sh $1 > $tmpdir/wbmfwvar.txt
 sudo hivexsh -w "$2/EFI/Microsoft/Boot/BCD" -f $tmpdir/wbmfwvar.txt
 }
 
+# Remove hivexsh scripts and BCD files created during the build process.
 cleanup () {
 if [[ "$verbose" == "true" ]]; then echo "Clean up temporary files..."; fi
 rm -f $tmpdir/winload.txt $tmpdir/recovery.txt $tmpdir/wbmfwvar.txt $tmpdir/BCD-Windows $tmpdir/BCD-Recovery
@@ -290,12 +306,14 @@ if [[ ! -z "$missing" ]]; then
 fi
 }
 
+# Script starts here.
 if [[ $(uname) != "Linux" ]]; then echo "Unsupported platform detected."; exit 1; fi
 
 if [[ $# -eq 0 ]]; then
 usage
 fi
 
+# Check for required packages that are missing.
 if [[ -z $(command -v hivexsh) ]]; then missing+=" hivex"; fi
 if [[ -z $(command -v hivexregedit) ]]; then missing+=" hivexregedit"; fi
 if [[ -z $(command -v setfattr) ]]; then missing+=" attr/setfattr"; fi
@@ -357,6 +375,7 @@ while (( "$#" )); do
 done
 shopt -u nocasematch
 
+# Check if source is a virtual disk file.
 if [[ "$winpath" == *".vhdx"* && -f "$winpath" ]];then
    virtual="true"
    imgpath="$winpath"
@@ -364,6 +383,8 @@ if [[ "$winpath" == *".vhdx"* && -f "$winpath" ]];then
    sleep 1 && mount_vpart
 fi
 
+# Check source for path to the WBM files then get the block device.
+# Get the mount point, file path and block device that contains the virtual disk file.
 if   [[ -d "$winpath/Windows/Boot" ]]; then
      windisk=$(lsblk -o path,mountpoint | grep "$winpath" | awk '{print $1}' | sed 's/[0-9]\+$//')
 elif [[ "$virtual" == "true" && -d "$vrtpath/Windows/Boot" ]]; then
@@ -377,6 +398,12 @@ else
     exit 1
 fi
 
+# Perform the actions appropriate for the specified firmware type.
+# Compare the WBM product versions of the source and system volumes.
+# Copy the boot files if missing or older than the source version.
+# Create new BCD stores or update existing ones with new entries.
+# Create a WBM firmware entry in the first or last position when needed.
+# Unmount the virtual disk and remove the temporary hive scripts/files.
 if  [[ "$firmware" != "uefi" && "$firmware" != "bios" && "$firmware" != "both" ]]; then
     echo -e "${RED}Unsupport firmware: Only UEFI, BIOS or BOTH.${NC}"
     exit 1
@@ -443,14 +470,16 @@ else
             else
                 copy_bootmgr "$winpath" "$syspath" "$fwmode"
             fi
-            build_stores "$winpath" "$syspath" "$fwmode" "$setfwmod" "$createbcd" "$prewbmdef" "$prodname" "$locale" "$verbose" "$virtual" "$vrtpath" "$imgstring"
+            build_stores "$winpath" "$syspath" "$fwmode" "$setfwmod" "$createbcd" "$prewbmdef" \
+                         "$prodname" "$locale" "$verbose" "$virtual" "$vrtpath" "$imgstring"
             if [[ "$setfwmod" == "false" && "$efibootvars" == "true" ]]; then
                if [[ ! -z "$wbmoptnum" ]]; then
                   if [[ "$verbose" == "true" ]]; then echo "Remove the current Windows Boot Manager option..."; fi
                   sudo efibootmgr -b "$wbmoptnum" -B > /dev/null
                fi
                if [[ "$verbose" == "true" ]]; then echo "Add the Windows Boot Manager to the firmware..."; fi
-               sudo efibootmgr -c -d "$efidisk" -p "$efinum" -l "$wbmefipath" -L "Windows Boot Manager" -@ $resdir/Templates/wbmoptdata.bin > /dev/null
+               sudo efibootmgr -c -d "$efidisk" -p "$efinum" -l "$wbmefipath" -L "Windows Boot Manager" \
+                               -@ $resdir/Templates/wbmoptdata.bin > /dev/null
                get_wbmoption && create_wbmfwvar "$wbmoptnum" "$syspath"
                if [[ "$setwbmlast" == "true" ]]; then
                   bootorder=$(efibootmgr | grep BootOrder: | awk '{print $2}' | sed "s/$wbmoptnum,//")
@@ -473,11 +502,13 @@ else
                    copy_bootmgr "$winpath" "$syspath" "$fwmode"
                fi
             fi
-            build_stores "$winpath" "$syspath" "$fwmode" "$setfwmod" "$createbcd" "$prewbmdef" "$prodname" "$locale" "$verbose" "$virtual" "$vrtpath" "$imgstring"
+            build_stores "$winpath" "$syspath" "$fwmode" "$setfwmod" "$createbcd" "$prewbmdef" \
+                         "$prodname" "$locale" "$verbose" "$virtual" "$vrtpath" "$imgstring"
             if [[ "$setfwmod" == "false" && "$efibootvars" == "true" ]]; then
                if [[ -z "$wbmoptnum" ]]; then
                   if [[ "$verbose" == "true" ]]; then echo "Add the Windows Boot Manager to the firmware..."; fi
-                  sudo efibootmgr -c -d "$efidisk" -p "$efinum" -l "$wbmefipath" -L "Windows Boot Manager" -@ $resdir/Templates/wbmoptdata.bin > /dev/null
+                  sudo efibootmgr -c -d "$efidisk" -p "$efinum" -l "$wbmefipath" -L "Windows Boot Manager" \
+                                  -@ $resdir/Templates/wbmoptdata.bin > /dev/null
                   get_wbmoption
                   if [[ "$setwbmlast" == "true" ]]; then
                      bootorder=$(efibootmgr | grep BootOrder: | awk '{print $2}' | sed "s/$wbmoptnum,//")
@@ -504,10 +535,12 @@ else
                sudo mv "$syspath/EFI/BCD-BOOT" "$syspath/EFI/Microsoft/Boot/BCD"
                sudo mv "$syspath/EFI/BCD-RECOVERY" "$syspath/EFI/Microsoft/Recovery/BCD"
             fi
-            update_winload "$winpath" "$syspath" "$fwmode" "$setfwmod" "$createbcd" "$prewbmdef" "$prodname" "$locale" "$verbose" "$virtual" "$vrtpath" "$imgstring"
+            update_winload "$winpath" "$syspath" "$fwmode" "$setfwmod" "$createbcd" "$prewbmdef" \
+                           "$prodname" "$locale" "$verbose" "$virtual" "$vrtpath" "$imgstring"
             if [[ "$setfwmod" == "false" && "$efibootvars" == "true" && -z "$wbmoptnum" ]]; then
                if [[ "$verbose" == "true" ]]; then echo "Add the Windows Boot Manager to the firmware..."; fi
-               sudo efibootmgr -c -d "$efidisk" -p "$efinum" -l "$wbmefipath" -L "Windows Boot Manager" -@ $resdir/Templates/wbmoptdata.bin > /dev/null
+               sudo efibootmgr -c -d "$efidisk" -p "$efinum" -l "$wbmefipath" -L "Windows Boot Manager" \
+                               -@ $resdir/Templates/wbmoptdata.bin > /dev/null
                get_wbmoption && create_wbmfwvar "$wbmoptnum" "$syspath"
                if [[ "$setwbmlast" == "true" ]]; then
                   bootorder=$(efibootmgr | grep BootOrder: | awk '{print $2}' | sed "s/$wbmoptnum,//")
@@ -585,7 +618,8 @@ else
           else
               copy_bootmgr "$winpath" "$syspath" "$fwmode" "$sysfstype"
           fi
-          build_stores "$winpath" "$syspath" "$fwmode" "$setfwmod" "$createbcd" "$prewbmdef" "$prodname" "$locale" "$verbose" "$virtual" "$vrtpath" "$imgstring"
+          build_stores "$winpath" "$syspath" "$fwmode" "$setfwmod" "$createbcd" "$prewbmdef" \
+                       "$prodname" "$locale" "$verbose" "$virtual" "$vrtpath" "$imgstring"
        elif [[ "$sysbtmgr" == "true" && "$clean" == "true" ]]; then
             if [[ "$verbose" == "true" ]]; then echo "Remove current BCD store..."; fi
             sudo rm -f "$syspath"/Boot/BCD
@@ -600,7 +634,8 @@ else
                   fi
                fi
             fi
-            build_stores "$winpath" "$syspath" "$fwmode" "$setfwmod" "$createbcd" "$prewbmdef" "$prodname" "$locale" "$verbose" "$virtual" "$vrtpath" "$imgstring"
+            build_stores "$winpath" "$syspath" "$fwmode" "$setfwmod" "$createbcd" "$prewbmdef" \
+                         "$prodname" "$locale" "$verbose" "$virtual" "$vrtpath" "$imgstring"
        else
             createbcd="false"
             if [[ "$sysuwfver" != "$localuwfver" || "$sysvhdver" != "$localvhdver" ]]; then
@@ -618,7 +653,8 @@ else
                   sudo mv "$syspath/BCD" "$syspath/Boot"
                fi
             fi
-            update_winload "$winpath" "$syspath" "$fwmode" "$setfwmod" "$createbcd" "$prewbmdef" "$prodname" "$locale" "$verbose" "$virtual" "$vrtpath" "$imgstring"
+            update_winload "$winpath" "$syspath" "$fwmode" "$setfwmod" "$createbcd" "$prewbmdef" \
+                           "$prodname" "$locale" "$verbose" "$virtual" "$vrtpath" "$imgstring"
        fi
        if [[ "$syspath" == "/mnt/winsys" ]]; then
           if [[ "$verbose" == "true" ]]; then echo "Removing temporary system mount point..."; fi
