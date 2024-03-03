@@ -1,6 +1,24 @@
+# bcd-sys.sh - main script
+# 
+# Copyright (C) 2024 Joseph P. Zeller
+# 
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 #!/usr/bin/bash
 
 firmware=$(test -d /sys/firmware/efi && echo uefi || echo bios)
+mntopts="rw,nosuid,nodev,relatime,uid=$(id -u),gid=$(id -g),iocharset=utf8,windows_names"
 setfwmod="false"
 createbcd="true"
 prewbmdef="false"
@@ -8,6 +26,7 @@ setwbmlast="false"
 locale="en-us"
 clean="false"
 virtual="false"
+rmsysmnt="false"
 unloadnbd="false"
 verbose="false"
 resdir="."
@@ -144,7 +163,7 @@ fi
 }
 
 # Used when no syspath is specified in the arguments.
-# Look for an ESP or active primary partition on the Windows disk or the first disk (/dev/sda).
+# Look for a system partition on the Windows disk, the first block device, or the root device.
 get_syspath () {
 firmware="$1"
 windisk="$2"
@@ -160,15 +179,30 @@ if   [[ "$firmware" == "uefi" ]]; then
         efidisk="/dev/sda"
      fi
      if [[ -z "$efipart" ]]; then
-        echo -e "${RED}Unable to locate ESP on $windisk or /dev/sda.${NC}"
+        rootdisk=$(findmnt -n -o SOURCE / | sed 's/[0-9]\+$//')
+        if [[ "$rootdisk" != "$windisk" && "$rootdisk" != "/dev/sda" ]]; then
+           efipart=$(sudo sfdisk -o device,type -l "$rootdisk" | grep "EFI" | awk '{print $1}')
+           efidisk="$rootdisk"
+        fi
+     fi
+     if [[ -z "$efipart" ]]; then
+        echo -e "${RED}Unable to locate an EFI System Partition.${NC}"
         echo "Use the --syspath option to specify a volume."
+        if [[ "$virtual" == "true" ]]; then umount_vpart; fi
         exit 1
      fi
+     efifstype=$(lsblk -o path,fstype | grep "$efipart" | awk '{print $2}')
      syspath=$(lsblk -o path,mountpoint | grep "$efipart" | awk '{print $2}')
      if [[ -z "${syspath// }" ]]; then
-        if [[ "$verbose" == "true" ]]; then echo "Mounting ESP on $efipart"; fi
-        sudo mkdir -p /mnt/EFI && sudo mount $efipart /mnt/EFI
+        rmsysmnt="true"
         syspath="/mnt/EFI"
+        sudo mkdir -p $syspath
+        if [[ "$verbose" == "true" ]]; then echo "Mounting ESP on $efipart"; fi
+        if  [[ "$efifstype" == "ntfs" ]]; then
+            sudo mount -t ntfs3 -o"$mntopts" $efipart $syspath
+        else
+            sudo mount $efipart $syspath
+        fi
      fi
 elif [[ "$firmware" == "bios" || "$firmware" == "both" ]]; then
      if [[ "$virtual" == "false" || "$verbose" == "true" ]]; then
@@ -187,19 +221,41 @@ elif [[ "$firmware" == "bios" || "$firmware" == "both" ]]; then
         fi
      fi
      if [[ -z "$syspart" ]]; then
-        echo -e "${RED}No active partition on $windisk or /dev/sda.${NC}"
+        rootdisk=$(findmnt -n -o SOURCE / | sed 's/[0-9]\+$//')
+        if [[ "$rootdisk" != "$windisk" && "$rootdisk" != "/dev/sda" ]]; then
+           syspart=$(sudo sfdisk -o device,boot -l "$rootdisk" 2>/dev/null | grep -E '/dev/.*\*' | awk '{print $1}')
+           errormsg=$(sudo sfdisk -o device,boot -l "$rootdisk" 2>&1>/dev/null)
+           if [[ "$errormsg" == "sfdisk: gpt unknown column: boot" ]]; then
+              echo -e "${BGTYELLOW}Root device $rootdisk is using GPT partition scheme.${NC}"
+           fi
+        fi
+     fi
+     if [[ -z "$syspart" ]]; then
+        echo -e "${RED}Unable to locate an active partition.${NC}"
         echo "Use the --syspath option to specify a volume."
+        if [[ "$virtual" == "true" ]]; then umount_vpart; fi
         exit 1
      fi
      if [[ "$firmware" == "both" ]]; then
         efipart="$syspart"
         efidisk=$(printf "$syspart" | sed 's/[0-9]\+$//')
      fi
+     sysfstype=$(lsblk -o path,fstype | grep "$syspart" | awk '{print $2}')
      syspath=$(lsblk -o path,mountpoint | grep "$syspart" | awk '{print $2}')
      if [[ -z "${syspath// }" ]]; then
-        if [[ "$verbose" == "true" ]]; then echo "Mounting active partition on $syspart"; fi
-        sudo mkdir -p /mnt/winsys && sudo mount $syspart /mnt/winsys
+        rmsysmnt="true"
         syspath="/mnt/winsys"
+        sudo mkdir -p $syspath
+        if [[ "$verbose" == "true" ]]; then echo "Mounting active partition on $syspart"; fi
+        if  [[ "$sysfstype" == "ntfs" ]]; then
+            sudo mount -t ntfs3 -o"$mntopts" $syspart $syspath
+        else
+            sudo mount $syspart $syspath
+        fi
+     fi
+     if [[ "$firmware" == "both" ]]; then
+        efipart="$syspart"
+        efifstype="$sysfstype"
      fi
 fi
 }
@@ -215,20 +271,27 @@ if   [[ "$firmware" == "uefi" ]]; then
         echo "Get block device for mount point (sudo required later)..."
      fi
      efipart=$(lsblk -o path,mountpoint | grep "$syspath" | awk '{print $1}')
+     efifstype=$(lsblk -o path,fstype | grep "$efipart" | awk '{print $2}')
 elif [[ "$firmware" == "bios" || "$firmware" == "both" ]]; then
      syspart=$(lsblk -o path,mountpoint | grep "$syspath" | awk '{print $1}')
      sysdisk=$(printf "$syspart" | sed 's/[0-9]\+$//')
-     if [[ "$firmware" == "both" ]]; then efipart="$syspart"; fi
      if [[ "$virtual" == "false" || "$verbose" == "true" ]]; then
         echo "Checking block device for active partition (sudo required)..."
      fi
      actpart=$(sudo sfdisk -o device,boot -l "$sysdisk" | grep -E '/dev/.*\*' | awk '{print $1}')
      if   [[ -z "$actpart" ]]; then
           echo -e "${RED}No active partition on $sysdisk.${NC}"
+          if [[ "$virtual" == "true" ]]; then umount_vpart; fi
           exit 1
      elif [[ "$syspart" != "$actpart" ]]; then
           echo -e "${RED}The volume $syspath on $syspart is not the active partition.${NC}"
+          if [[ "$virtual" == "true" ]]; then umount_vpart; fi
           exit 1
+     fi
+     sysfstype=$(lsblk -o path,fstype | grep "$syspart" | awk '{print $2}')
+     if [[ "$firmware" == "both" ]]; then
+        efipart="$syspart"
+        efifstype="$sysfstype"
      fi
 fi
 }
@@ -257,15 +320,14 @@ sudo qemu-nbd -c "$vrtdisk" "$imgpath"
 # Display partitions on virtual disk and mount the specified volume.
 mount_vpart () {
 vrtpath="/mnt/virtwin"
-mntopts="rw,nosuid,nodev,relatime,uid=$(id -u),gid=$(id -g),iocharset=utf8,windows_names"
 echo "Partition table on: $imgpath"
 echo
 lsblk "$vrtdisk" -o path,pttype,fstype,parttypename,label,mountpoint | sed '2d'
 echo
-read -p "Enter device containing the Windows volume (ex. nbd0p1):" vtwinpart
+read -p "Enter device containing the Windows volume [nbd#p#]:" vtwinpart
 while [[ "$vtwinpart" != *"nbd"* || ! -e "/dev/$vtwinpart" ]]; do
       echo -e "${BGTYELLOW}Invalid partition specified. Please try again.${NC}"
-      read -p "Enter device containing the Windows volume (ex. nbd0p1):" vtwinpart
+      read -p "Enter device containing the Windows volume [nbd#p#]:" vtwinpart
 done
 sudo mkdir -p "$vrtpath" && sudo mount -t ntfs3 -o"$mntopts" /dev/$vtwinpart "$vrtpath"
 }
@@ -279,6 +341,16 @@ sudo qemu-nbd -d "$vrtdisk" > /dev/null
 if [[ "$unloadnbd" == "true" ]]; then
    sleep 1 && sudo rmmod nbd
 fi
+}
+
+# Unmount the EFI or Windows System Partition mounted automatically by get_syspath.
+umount_system () {
+if   [[ "$syspath" == "/mnt/EFI" ]]; then
+     if [[ "$verbose" == "true" ]]; then echo "Removing temporary ESP mount point..."; fi
+elif [[ "$syspath" == "/mnt/winsys" ]]; then
+     if [[ "$verbose" == "true" ]]; then echo "Removing temporary system mount point..."; fi
+fi
+sudo umount "$syspath" && sudo rm -rf "$syspath"
 }
 
 # Check for the WBM in the current firmware boot options.
@@ -426,13 +498,14 @@ else
        else
            localwbmpath="$winpath/Windows/Boot/EFI/bootmgfw.efi"
        fi
-       efifstype=$(lsblk -o path,fstype | grep "$efipart" | awk '{print $2}')
        if [[ "$efifstype" != "vfat" ]]; then
           echo "Partition at $efipart is $efifstype format."
           if  [[ "$efifstype" == "ntfs" ]]; then
               echo -e "${BGTYELLOW}Disk may not be UEFI bootable on all systems.${NC}"
           else
               echo -e "${RED}ESP must be FAT or NTFS format.${NC}"
+              if [[ "$virtual" == "true" ]]; then umount_vpart; fi
+              if [[ "$rmsysmnt" == "true" ]]; then umount_system; fi
               exit 1
           fi
        fi
@@ -455,14 +528,7 @@ else
             else
                 echo -e "${RED}Unable to find the EFI boot files at $winpath${NC}"
             fi
-            if [[ "$syspath" == "/mnt/EFI" || "$syspath" == "/mnt/winsys" ]]; then
-               if  [[ "$firmware" == "uefi" ]]; then
-                   if [[ "$verbose" == "true" ]]; then echo "Removing temporary ESP mount point..."; fi
-               else
-                   if [[ "$verbose" == "true" ]]; then echo "Removing temporary system mount point..."; fi
-               fi
-               sudo umount "$syspath" && sudo rm -rf "$syspath"
-            fi
+            if [[ "$rmsysmnt" == "true" ]]; then umount_system; fi
             exit 1
        elif ! sudo test -f "$syswbmpath"; then
             if  [[ "$virtual" == "true" ]]; then
@@ -554,12 +620,9 @@ else
           sudo mkdir -p "$syspath"/EFI/BOOT
           sudo cp "$localwbmpath" "$defbootpath"
        fi
-       if [[ "$syspath" == "/mnt/EFI" ]]; then
-          if [[ "$verbose" == "true" ]]; then echo "Removing temporary ESP mount point..."; fi
-          sudo umount "$syspath" && sudo rm -rf "$syspath"
-       fi
-       cleanup
+       if [[ "$rmsysmnt" == "true" && "$firmware" == "uefi" ]]; then umount_system; fi
        if [[ "$virtual" == "true" && "$firmware" == "uefi" ]]; then umount_vpart; fi
+       cleanup
        echo "Finished configuring UEFI boot files."
     fi
     if [[ "$firmware" == "bios" || "$firmware" == "both" ]]; then
@@ -571,6 +634,7 @@ else
             fi
        else
             echo -e "${RED}Invalid system path please try again.${NC}"
+            if  [[ "$virtual" == "true" ]]; then umount_vpart; fi
             exit 1
        fi
        fwmode="bios"
@@ -584,10 +648,11 @@ else
            localuwfpath="$winpath/Windows/Boot/PCAT/bootuwf.dll"
            localvhdpath="$winpath/Windows/Boot/PCAT/bootvhd.dll"
        fi
-       sysfstype=$(lsblk -o path,fstype | grep "$syspart" | awk '{print $2}')
        if [[ "$sysfstype" != "vfat" && "$sysfstype" != "ntfs" ]]; then
           echo "Active partition $syspart is $sysfstype format."
           echo -e "${RED}System partition must be FAT or NTFS format.${NC}"
+          if [[ "$virtual" == "true" ]]; then umount_vpart; fi
+          if [[ "$rmsysmnt" == "true" ]]; then umount_system; fi
           exit 1
        fi
        if  [[ -f "$localuwfpath" && -f "$localvhdpath" ]]; then
@@ -600,11 +665,7 @@ else
            else
                echo -e "${RED}Unable to find the BIOS boot files at $winpath${NC}"
            fi
-           if [[ "$syspath" == "/mnt/winsys" ]]; then
-              if [[ "$verbose" == "true" ]]; then echo "Removing temporary system mount point..."; fi
-              sudo umount "$syspath" && sudo rm -rf "$syspath"
-           fi
-           
+           if [[ "$rmsysmnt" == "true" ]]; then umount_system; fi           
            exit 1
        fi
        if sudo test -f "$sysuwfpath" && sudo test -f "$sysvhdpath"; then
@@ -656,12 +717,9 @@ else
             update_winload "$winpath" "$syspath" "$fwmode" "$setfwmod" "$createbcd" "$prewbmdef" \
                            "$prodname" "$locale" "$verbose" "$virtual" "$vrtpath" "$imgstring"
        fi
-       if [[ "$syspath" == "/mnt/winsys" ]]; then
-          if [[ "$verbose" == "true" ]]; then echo "Removing temporary system mount point..."; fi
-          sudo umount "$syspath" && sudo rm -rf "$syspath"
-       fi
-       cleanup
+       if [[ "$rmsysmnt" == "true" ]]; then umount_system; fi
        if [[ "$virtual" == "true" ]]; then umount_vpart; fi
+       cleanup
        echo "Finished configuring BIOS boot files."
     fi
 fi
