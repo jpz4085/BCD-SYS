@@ -25,11 +25,11 @@ Options:
 
 This script will copy the boot files, if missing or outdated, from
 the Windows installation located at <source> to a system partition
-on either the same drive or the first drive (/dev/sda) whichever
-exists. Alternatively a volume mounted at <system> can be specified
-using the --syspath option. Any duplicate objects will be deleted
-from an existing BCD when creating new entries. The system template
-at Windows/System32/config/BCD-Template is currently ignored.
+on either the same drive, the first block device or the root device
+whichever exists. Alternatively a volume mounted at <system> can be
+specified using the --syspath option. Any duplicate objects will be
+deleted from an existing BCD when creating new entries. The system
+template at Windows/System32/config/BCD-Template is not used.
 
 The default firmware type is the same type running under Linux. UEFI
 is supported on GPT and MBR disks while BIOS or BOTH requires legacy
