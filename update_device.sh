@@ -1,3 +1,5 @@
+#!/usr/bin/bash
+
 # update_device.sh - format physical and virtual disk signatures/offsets
 #                    used by device entries such as 11000001 and 21000001
 # 
@@ -15,8 +17,6 @@
 # 
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-
-#!/usr/bin/bash
 
 endian () {
 v=$1

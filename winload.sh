@@ -1,3 +1,5 @@
+#!/usr/bin/bash
+
 # winload.sh - create Windows loader and related entries.
 # 
 # Copyright (C) 2024 Joseph P. Zeller
@@ -14,8 +16,6 @@
 # 
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-
-#!/usr/bin/bash
 
 gen_uuid () {
 python3 -c 'import uuid; print(uuid.uuid4())'

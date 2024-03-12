@@ -1,3 +1,5 @@
+#!/usr/bin/bash
+
 # wbmfwvar.sh - read and format the WBM firmware variable data required
 #               by the BCD entry when adding the WBM to the UEFI options.
 # 
@@ -15,8 +17,6 @@
 # 
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-
-#!/usr/bin/bash
 
 endian () {
 v=$1

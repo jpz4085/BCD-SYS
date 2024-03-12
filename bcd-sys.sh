@@ -1,3 +1,5 @@
+#!/usr/bin/bash
+
 # bcd-sys.sh - main script
 # 
 # Copyright (C) 2024 Joseph P. Zeller
@@ -14,8 +16,6 @@
 # 
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-
-#!/usr/bin/bash
 
 firmware=$(test -d /sys/firmware/efi && echo uefi || echo bios)
 mntopts="rw,nosuid,nodev,relatime,uid=$(id -u),gid=$(id -g),iocharset=utf8,windows_names"
@@ -467,6 +467,7 @@ elif [[ "$virtual" == "true" && -d "$vrtpath/Windows/Boot" ]]; then
      if [[ "$imgpath" == *"/media"* ]]; then imgstring=$(echo "$imgpath" | cut -d/ -f5- | sed 's/^/\\/;s/\//\\/g'); fi
 else
     echo -e "${RED}Invalid source path please try again.${NC}"
+    if  [[ "$virtual" == "true" ]]; then umount_vpart; fi
     exit 1
 fi
 
@@ -478,6 +479,7 @@ fi
 # Unmount the virtual disk and remove the temporary hive scripts/files.
 if  [[ "$firmware" != "uefi" && "$firmware" != "bios" && "$firmware" != "both" ]]; then
     echo -e "${RED}Unsupport firmware: Only UEFI, BIOS or BOTH.${NC}"
+    if  [[ "$virtual" == "true" ]]; then umount_vpart; fi
     exit 1
 else
     if [[ "$firmware" == "uefi" || "$firmware" == "both" ]]; then
@@ -487,6 +489,7 @@ else
             get_device "$firmware" "$syspath"
        else
             echo -e "${RED}Invalid ESP path please try again.${NC}"
+            if  [[ "$virtual" == "true" ]]; then umount_vpart; fi
             exit 1
        fi
        fwmode="uefi"
