@@ -1,3 +1,5 @@
+#!/usr/bin/env bash
+
 # detach-vhdx.sh - disconnect virtual disk and unload nbd module
 # 
 # Copyright (C) 2024 Joseph P. Zeller
@@ -15,8 +17,6 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-#!/usr/bin/bash
-
 rmnbdmod="false"
 
 usage () {
@@ -27,31 +27,36 @@ echo "-u, --unload	Unload the NBD kernel module."
 exit
 }
 
-if [[ $# -eq 0 ]]; then usage; fi
+if   [[ $(uname) == "Linux" ]]; then
+     if [[ $# -eq 0 ]]; then usage; fi
 
-shopt -s nocasematch
-while (( "$#" )); do
-	case "$1" in
-	    -u | --unload )
-	       rmnbdmod="true"
-	       shift
-	       ;;
-	    * )
-	      nbdpath="$1"
-	      shift
-	      ;;
-	esac
-done
-shopt -u nocasematch
+     shopt -s nocasematch
+     while (( "$#" )); do
+	     case "$1" in
+	         -u | --unload )
+	            rmnbdmod="true"
+	            shift
+	            ;;
+	         * )
+	           nbdpath="$1"
+	           shift
+	           ;;
+	     esac
+     done
+     shopt -u nocasematch
 
-if  [[ ! -e "$nbdpath" ]]; then
-    echo "Invalid device path: $nbdpath"
-    exit 1
-else
-    echo "Detach virtual disk (sudo required)..."
-    sudo qemu-nbd -d "$nbdpath"
-    if [[ "$rmnbdmod" == "true" ]]; then
-       echo "Unload nbd kernel module..."
-       sleep 1 && sudo rmmod nbd
-    fi
+     if  [[ ! -e "$nbdpath" ]]; then
+         echo "Invalid device path: $nbdpath"
+         exit 1
+     else
+         echo "Detach virtual disk (sudo required)..."
+         sudo qemu-nbd -d "$nbdpath"
+         if [[ "$rmnbdmod" == "true" ]]; then
+            echo "Unload nbd kernel module..."
+            sleep 1 && sudo rmmod nbd
+         fi
+     fi
+elif [[ $(uname) == "Darwin" ]]; then
+     echo "Use hdiutil to detach the virtual disk."
+     exit
 fi

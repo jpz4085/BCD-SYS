@@ -31,7 +31,7 @@ specified using the --syspath option. Any duplicate objects will be
 deleted from an existing BCD when creating new entries. The system
 template at Windows/System32/config/BCD-Template is not used.
 
-The default firmware type is the same type running under Linux. UEFI
+The default firmware type is based on the current environment. UEFI
 is supported on GPT and MBR disks while BIOS or BOTH requires legacy
 bootable MBR partitions with boot sectors created using a tool like
 ms-sys. The Windows Boot Manager will be added to the UEFI firmware
