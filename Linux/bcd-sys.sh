@@ -394,6 +394,13 @@ if [[ -z $(command -v peres) ]]; then missing+=" pev/peres"; fi
 if [[ -z $(command -v xxd) ]]; then missing+=" xxd"; fi
 requirements_message
 
+# Create symlinks to Resources and Templates folder if needed.
+if [[ "$resdir" == "." ]]; then
+   if [[ ! -d "$resdir/Resources" && ! -d "$resdir/Templates" ]]; then
+      ln -s ../Resources && ln -s ../Templates
+   fi
+fi
+
 shopt -s nocasematch
 while (( "$#" )); do
 	case "$1" in
