@@ -51,6 +51,14 @@ echo "Usage: $(basename $0) <source> [options] <system>"
 echo
 cat $resdir/Resources/help-page.txt
 echo
+echo "Notes:"
+echo
+echo "1. Access to the block device for the macOS startup disk requires SIP"
+echo "   filesystem protections to be temporarily disabled when necessary."
+echo
+echo "2. The scripts support a hybrid MBR on physical media but not virtual"
+echo "   disks which will not be checked and should use GPT or MBR scheme."
+echo
 exit
 }
 
@@ -150,27 +158,38 @@ if   [[ "$3" == "uefi" ]]; then
      mkdir -p "$2"/EFI/Microsoft/Recovery
      cp -r "$1"/Windows/Boot/EFI "$2"/EFI/Microsoft/Boot
      cp -r "$1"/Windows/Boot/Fonts "$2"/EFI/Microsoft/Boot
-     cp -r "$1"/Windows/Boot/Resources "$2"/EFI/Microsoft/Boot
+     if [[ -d "$1"/Windows/Boot/Resources ]]; then
+        cp -r "$1"/Windows/Boot/Resources "$2"/EFI/Microsoft/Boot
+     fi
 elif [[ "$3" == "bios" ]]; then
      if [[ "$verbose" == "true" ]]; then echo "Copy the BIOS boot files to the system partition..."; fi
      cp -r "$1"/Windows/Boot/PCAT "$2"/Boot
      cp -r "$1"/Windows/Boot/Fonts "$2"/Boot
-     cp -r "$1"/Windows/Boot/Resources "$2"/Boot
-     mv "$2"/Boot/bootmgr "$2" && mv "$2"/Boot/bootnxt "$2"/BOOTNXT
+     if [[ -d "$1"/Windows/Boot/Resources ]]; then 
+        cp -r "$1"/Windows/Boot/Resources "$2"/Boot
+     fi
+     mv "$2"/Boot/bootmgr "$2"
+     if [[ -f "$1"/Windows/Boot/PCAT/bootnxt ]]; then
+        mv "$2"/Boot/bootnxt "$2"/BOOTNXT
+     fi
      # Only MS-DOS, Tuxera and NTFS-3G file system attributes supported.
      if [[ "$4" == "NTFS" ]]; then
         if [[ "$verbose" == "true" ]]; then echo "Set extended NTFS attributes (Hidden/System/Read Only)..."; fi
         if   [[ "$sysfsvendor" == "Tuxera" ]]; then
              tntfs setflags "$2"/bootmgr hidden=1 system=1 readonly=1
-             tntfs setflags "$2"/BOOTNXT hidden=1 system=1
+             if [[ -f "$1"/Windows/Boot/PCAT/bootnxt ]]; then
+                tntfs setflags "$2"/BOOTNXT hidden=1 system=1
+             fi
              tntfs setflags "$2"/Boot hidden=1 system=1
         elif [[ ! -z $(command -v ntfs-3g) ]]; then
              xattr -wx system.ntfs_attrib_be 00000027 "$2"/bootmgr
-             xattr -wx system.ntfs_attrib_be 00000026 "$2"/BOOTNXT
+             if [[ -f "$1"/Windows/Boot/PCAT/bootnxt ]]; then
+                xattr -wx system.ntfs_attrib_be 00000026 "$2"/BOOTNXT
+             fi
              xattr -wx system.ntfs_attrib_be 00000006 "$2"/Boot
         fi
      fi
-     if [[ "$4" == "MS-DOS" ]]; then
+     if [[ "$4" == "FAT12" || "$4" == "FAT16" || "$4" == "FAT32" ]]; then
         if [[ "$verbose" == "true" ]]; then echo "Set filesystem attributes (Hidden/System/Read Only)..."; fi
         mtoolscfg="/tmp/mtools-bcdsys"
         export MTOOLSRC=$mtoolscfg
@@ -178,24 +197,35 @@ elif [[ "$3" == "bios" ]]; then
         echo "mtools_skip_check=1" >> $mtoolscfg
         diskutil unmount $syspart > /dev/null
         sudo -E mattrib +s +h +r S:/bootmgr
-        sudo -E mattrib +s +h S:/BOOTNXT
+        if [[ -f "$1"/Windows/Boot/PCAT/bootnxt ]]; then
+           sudo -E mattrib +s +h S:/BOOTNXT
+        fi
         sudo -E mattrib +s +h S:/Boot
-        diskutil mount $syspart > /dev/null
+        sudo diskutil mount $syspart > /dev/null
      fi
 fi
 }
 
 # Used when no syspath is specified in the arguments.
-# Look for an ESP or active primary partition on the Windows disk.
-# The startup disk should always be GPT/UEFI scheme under macOS.
+# Look for an EFI System Partition or active primary partition on
+# the Windows disk, the macOS startup disk or the first block device.
+# Detect the presence of a hybrid MBR on devices using the GPT scheme.
+# Check for compatibility between the partition scheme and firmware mode.
 get_syspath () {
 firmware="$1"
 windisk="$2"
 
 if   [[ "$firmware" == "uefi" ]]; then
      echo "Checking block devices for ESP (sudo required)..."
-     if [[ "$wptscheme" == "FDisk_partition_scheme" ]]; then
-        checkmbr_signature $windisk
+     if   [[ "$wptscheme" == "FDisk_partition_scheme" ]]; then
+          checkmbr_signature $windisk
+     elif [[ "$wptscheme" == "GUID_partition_scheme" ]]; then
+          if [[ ! -z $(sudo fdisk "$windisk" | grep -E '2:|3:|4:' | grep -v unused) ]]; then
+             if [[ "$virtual" == "true" ]]; then umount_vpart; fi
+             echo -e "${BGTYELLOW}Hybrid MBR detected on $windisk but firmware mode is UEFI.${NC}"
+             echo -e "${RED}This configuration is not compatible with Windows in UEFI mode.${NC}"
+             exit 1
+          fi
      fi
      if [[ "$virtual" == "true" && "$vptscheme" == "FDisk_partition_scheme" ]]; then
         checkmbr_signature $vrtdisk
@@ -208,20 +238,34 @@ if   [[ "$firmware" == "uefi" ]]; then
         elif [[ "$rootfstype" == "hfs" ]]; then
              macdisk=$(diskutil info / | grep "Part of Whole:" | awk '{print $NF}')
         fi
-        efipart=$(diskutil list $macdisk | grep "EFI" | awk '{print $NF}')
-        if [[ ! -z "$efipart" && ! -z $(csrutil status | grep "Filesystem Protections: enabled") ||
-              ! -z $(csrutil status | grep -Fx "System Integrity Protection status: enabled.") ]]; then
-           if [[ "$virtual" == "true" ]]; then umount_vpart; fi
-           echo "No ESP found on the Windows media ($windisk)"
-           echo -e "${RED}Unable to get device information from startup disk.${NC}"
-           echo "Disable SIP filesystem protections or specify a system volume."
-           exit 1
+        if   [[ ! -z $(csrutil status | grep "Filesystem Protections: enabled") ||
+                ! -z $(csrutil status | grep -Fx "System Integrity Protection status: enabled.") ]]; then
+             echo -e "${BGTYELLOW}Unable to get device information from startup disk.${NC}"
+        elif [[ ! -z $(sudo fdisk "/dev/$macdisk" | grep -E '2:|3:|4:' | grep -v unused) ]]; then
+             echo -e "${BGTYELLOW}Hybrid MBR detected on /dev/$macdisk but firmware mode is UEFI.${NC}"
+        else
+             efipart=$(diskutil list $macdisk | grep "EFI" | awk '{print $NF}')
         fi
      fi
      if [[ -z "$efipart" ]]; then
-        echo -e "${RED}Unable to locate ESP on $windisk or /dev/$macdisk.${NC}"
-        echo "Use the --syspath option to specify a volume."
+        if [[ "$windisk" != /dev/disk0 && "/dev/$macdisk" != /dev/disk0 ]]; then
+           zptscheme=$(diskutil info disk0 | grep "Content (IOContent):" | awk '{print $3}')
+           if   [[ "$zptscheme" == "FDisk_partition_scheme" ]]; then
+                checkmbr_signature /dev/disk0
+                efipart=$(diskutil list disk0| grep "EFI" | awk '{print $NF}')
+           elif [[ "$zptscheme" == "GUID_partition_scheme" ]]; then
+                if   [[ ! -z $(sudo fdisk /dev/disk0 | grep -E '2:|3:|4:' | grep -v unused) ]]; then
+                     echo -e "${BGTYELLOW}Hybrid MBR detected on /dev/disk0 but firmware mode is UEFI.${NC}"
+                else
+                     efipart=$(diskutil list disk0| grep "EFI" | awk '{print $NF}')
+                fi
+           fi
+        fi
+     fi
+     if [[ -z "$efipart" ]]; then
         if [[ "$virtual" == "true" ]]; then umount_vpart; fi
+        echo -e "${RED}Unable to locate an EFI System Partition.${NC}"
+        echo "Use the --syspath option to specify a volume."
         exit 1
      fi
      efifsvendor=$(diskutil info $efipart | grep "File System Personality:" | awk '{print $(NF - 1)}')
@@ -242,8 +286,8 @@ if   [[ "$firmware" == "uefi" ]]; then
           syspath=$(diskutil info $efipart | grep "Mount Point:" | awk -v n=3 '{ for (i=n; i<=NF; i++) printf "%s%s", $i, (i<NF ? OFS : ORS)}')
           espvolronly=$(diskutil info $efipart | grep "Volume Read-Only:" | awk '{print $3}')
           if [[ -z "$syspath" || "$espvolronly" == "Yes" ]]; then
-               echo -e "${RED}Unable to mount ESP for write access.${NC}"
                if [[ "$virtual" == "true" ]]; then umount_vpart; fi
+               echo -e "${RED}Unable to mount ESP for write access.${NC}"
                exit 1
           fi
      elif [[ ! -z "$syspath" && "$efifstype" == "NTFS" ]]; then
@@ -261,31 +305,106 @@ if   [[ "$firmware" == "uefi" ]]; then
              syspath=$(diskutil info $efipart | grep "Mount Point:" | awk -v n=3 '{ for (i=n; i<=NF; i++) printf "%s%s", $i, (i<NF ? OFS : ORS)}')
              espvolronly=$(diskutil info $efipart | grep "Volume Read-Only:" | awk '{print $3}')
              if [[ -z "$syspath" || "$espvolronly" == "Yes" ]]; then
-                echo -e "${RED}Unable to remount ESP for write access.${NC}"
                 if [[ "$virtual" == "true" ]]; then umount_vpart; fi
+                echo -e "${RED}Unable to remount ESP for write access.${NC}"
                 exit 1
              fi
           fi
      fi
 elif [[ "$firmware" == "bios" || "$firmware" == "both" ]]; then
      echo "Checking block devices for active partition (sudo required)..."
-     if [[ "$wptscheme" == "FDisk_partition_scheme" ]]; then
-        checkmbr_signature $windisk
-        actpnum=$(sudo fdisk "$windisk" | grep -E '\*[0-9]' | awk '{print $1}' | sed 's/\*//;s/\://')
-        if [[ ! -z "$actpnum" ]]; then
-           syspart="$windisk"s"$actpnum"
-        fi
+     if   [[ "$wptscheme" == "FDisk_partition_scheme" ]]; then
+          checkmbr_signature $windisk
+          actpnum=$(sudo fdisk "$windisk" | grep -E '\*[0-9]' | awk '{print $1}' | sed 's/\*//;s/\://')
+          if [[ ! -z "$actpnum" ]]; then
+             syspart="$windisk"s"$actpnum"
+          fi
      elif [[ "$wptscheme" == "GUID_partition_scheme" ]]; then
-        echo -e "${BGTYELLOW}Windows disk $windisk is using GPT partition scheme.${NC}"
+          if   [[ ! -z $(sudo fdisk "$windisk" | grep -E '2:|3:|4:' | grep -v unused) ]]; then
+               if   [[ "$verbose" == "true" && "$firmware" == "bios" ]]; then
+                    echo "Hybrid MBR detected on $windisk"
+               elif [[ "$firmware" == "both" ]]; then
+                    if [[ "$virtual" == "true" ]]; then umount_vpart; fi
+                    echo -e "${BGTYELLOW}Hybrid MBR detected on $windisk but firmware mode is BOTH.${NC}"
+                    echo -e "${RED}This configuration is not compatible with Windows in UEFI mode.${NC}"
+                    exit 1
+               fi
+               checkmbr_signature $windisk
+               actpsect=$(sudo fdisk "$windisk" | grep -E '\*[0-9]' | awk '{print $11}')
+               actpnum=$(sudo gpt show "$windisk" 2> /dev/null | grep -w "$actpsect" | awk '{print $3}')
+               if [[ ! -z "$actpnum" ]]; then
+                  syspart="$windisk"s"$actpnum"
+               fi
+          else
+               if [[ "$virtual" == "true" ]]; then umount_vpart; fi
+               echo -e "${BGTYELLOW}Windows disk $windisk is using GPT partition scheme.${NC}"
+               echo -e "${RED}This configuration is not compatible with Windows in BIOS mode.${NC}"
+               exit 1
+          fi
      fi
      if [[ "$virtual" == "true" && "$vptscheme" == "FDisk_partition_scheme" ]]; then
         checkmbr_signature $vrtdisk
      fi
-     # Don't bother checking the startup disk for an active partition that shouldn't exist.
      if [[ -z "$syspart" ]]; then
-        echo -e "${RED}No active partition found on the Windows media.${NC}"
-        echo "Use the --syspath option to specify a volume."
+        rootfstype=$(diskutil info / | grep "Type (Bundle):" | awk '{print $NF}')
+        if   [[ "$rootfstype" == "apfs" ]]; then
+             macdisk=$(diskutil info / | grep "APFS Physical Store:" | awk '{print $NF}' | sed 's/s[0-9]*$//')
+        elif [[ "$rootfstype" == "hfs" ]]; then
+             macdisk=$(diskutil info / | grep "Part of Whole:" | awk '{print $NF}')
+        fi
+        if   [[ ! -z $(csrutil status | grep "Filesystem Protections: enabled") ||
+                ! -z $(csrutil status | grep -Fx "System Integrity Protection status: enabled.") ]]; then
+             echo -e "${BGTYELLOW}Unable to get device information from startup disk.${NC}"
+        else
+             if   [[ ! -z $(sudo fdisk "/dev/$macdisk" | grep -E '2:|3:|4:' | grep -v unused) ]]; then
+                  if   [[ "$firmware" == "bios" ]]; then
+                       if [[ "$verbose" == "true" ]]; then echo "Hybrid MBR detected on /dev/$macdisk"; fi
+                       checkmbr_signature /dev/$macdisk
+                       actpsect=$(sudo fdisk "/dev/$macdisk" | grep -E '\*[0-9]' | awk '{print $11}')
+                       actpnum=$(sudo gpt show "/dev/$macdisk" 2> /dev/null | grep -w "$actpsect" | awk '{print $3}')
+                       if [[ ! -z "$actpnum" ]]; then
+                          syspart="/dev/$macdisk"s"$actpnum"
+                       fi
+                  elif [[ "$firmware" == "both" ]]; then
+                       echo -e "${BGTYELLOW}Hybrid MBR detected on /dev/$macdisk but firmware mode is BOTH.${NC}"
+                  fi
+             else
+                  echo -e "${BGTYELLOW}Startup disk /dev/$macdisk is using GPT partition scheme.${NC}"
+             fi
+       fi
+     fi
+     if [[ -z "$syspart" ]]; then
+        if [[ "$windisk" != /dev/disk0 && "/dev/$macdisk" != /dev/disk0 ]]; then
+           zptscheme=$(diskutil info disk0 | grep "Content (IOContent):" | awk '{print $3}')
+           if   [[ "$zptscheme" == "FDisk_partition_scheme" ]]; then
+                checkmbr_signature /dev/disk0
+                actpnum=$(sudo fdisk /dev/disk0 | grep -E '\*[0-9]' | awk '{print $1}' | sed 's/\*//;s/\://')
+                if [[ ! -z "$actpnum" ]]; then
+                   syspart="/dev/disk0s$actpnum"
+                fi
+           elif [[ "$zptscheme" == "GUID_partition_scheme" ]]; then
+                if   [[ ! -z $(sudo fdisk /dev/disk0 | grep -E '2:|3:|4:' | grep -v unused) ]]; then
+                     if   [[ "$firmware" == "bios" ]]; then
+                          if [[  "$verbose" == "true" ]]; then echo "Hybrid MBR detected on /dev/disk0"; fi
+                          checkmbr_signature /dev/disk0
+                          actpsect=$(sudo fdisk /dev/disk0 | grep -E '\*[0-9]' | awk '{print $11}')
+                          actpnum=$(sudo gpt show /dev/disk0 2> /dev/null | grep -w "$actpsect" | awk '{print $3}')
+                          if [[ ! -z "$actpnum" ]]; then
+                             syspart="/dev/disk0s$actpnum"
+                          fi
+                     elif [[ "$firmware" == "both" ]]; then
+                          echo -e "${BGTYELLOW}Hybrid MBR detected on /dev/disk0 but firmware mode is BOTH.${NC}"
+                     fi
+                else
+                     echo -e "${BGTYELLOW}Block device /dev/disk0 is using GPT partition scheme.${NC}"
+                fi
+           fi
+        fi
+     fi
+     if [[ -z "$syspart" ]]; then
         if [[ "$virtual" == "true" ]]; then umount_vpart; fi
+        echo -e "${RED}Unable to locate an active partition.${NC}"
+        echo "Use the --syspath option to specify a volume."
         exit 1
      fi
      sysfsvendor=$(diskutil info $syspart | grep "File System Personality:" | awk '{print $(NF - 1)}')
@@ -295,7 +414,7 @@ elif [[ "$firmware" == "bios" || "$firmware" == "both" ]]; then
           if [[ "$verbose" == "true" ]]; then echo "Mounting active partition on $syspart"; fi
           rmsysmnt="true"
           if   [[ "$sysfsvendor" == "MS-DOS" || "$sysfsvendor" == "Tuxera" || "$sysfstype" == "UFSD_NTFS" ]]; then
-               diskutil mount $syspart > /dev/null
+               sudo diskutil mount $syspart > /dev/null
           elif [[ "$sysfstype" == "NTFS" ]]; then
                if   [[ ! -z $(command -v ntfs-3g) ]]; then
                     mount_ntfs3g $syspart
@@ -306,8 +425,8 @@ elif [[ "$firmware" == "bios" || "$firmware" == "both" ]]; then
           syspath=$(diskutil info $syspart | grep "Mount Point:" | awk -v n=3 '{ for (i=n; i<=NF; i++) printf "%s%s", $i, (i<NF ? OFS : ORS)}')
           sysvolronly=$(diskutil info $syspart | grep "Volume Read-Only:" | awk '{print $3}')
           if [[ -z "$syspath" || "$sysvolronly" == "Yes" ]]; then
-               echo -e "${RED}Unable to mount active partition for write access.${NC}"
                if [[ "$virtual" == "true" ]]; then umount_vpart; fi
+               echo -e "${RED}Unable to mount active partition for write access.${NC}"
                exit 1
           fi
      elif [[ ! -z "$syspath" && "$sysfstype" == "NTFS" ]]; then
@@ -316,7 +435,7 @@ elif [[ "$firmware" == "bios" || "$firmware" == "both" ]]; then
               rmsysmnt="true"
               diskutil unmount $syspart > /dev/null
               if   [[ "$sysfsvendor" == "Tuxera" || "$sysfstype" == "UFSD_NTFS" ]]; then
-                   diskutil mount $syspart > /dev/null
+                   sudo diskutil mount $syspart > /dev/null
               elif [[ ! -z $(command -v ntfs-3g) ]]; then
                    mount_ntfs3g $syspart
               else
@@ -325,8 +444,8 @@ elif [[ "$firmware" == "bios" || "$firmware" == "both" ]]; then
               syspath=$(diskutil info $syspart | grep "Mount Point:" | awk -v n=3 '{ for (i=n; i<=NF; i++) printf "%s%s", $i, (i<NF ? OFS : ORS)}')
               sysvolronly=$(diskutil info $syspart | grep "Volume Read-Only:" | awk '{print $3}')
               if [[ -z "$syspath" || "$sysvolronly" == "Yes" ]]; then
-                 echo -e "${RED}Unable to remount active partition for write access.${NC}"
                  if [[ "$virtual" == "true" ]]; then umount_vpart; fi
+                 echo -e "${RED}Unable to remount active partition for write access.${NC}"
                  exit 1
               fi
           fi
@@ -341,78 +460,225 @@ fi
 
 # Used when a syspath is provided in the arguments.
 # Find the block device (and active partition if BIOS/BOTH) for the specified mount point.
+# Detect the presence of a hybrid MBR on devices using the GPT scheme.
+# Check for compatibility between the partition scheme and firmware mode.
 get_device () {
 firmware="$1"
 syspath="$2"
 
 if   [[ "$firmware" == "uefi" ]]; then
      echo "Get block device for mount point (sudo required)..."
-     if [[ "$wptscheme" == "FDisk_partition_scheme" ]]; then
-        checkmbr_signature $windisk
+     if   [[ "$wptscheme" == "FDisk_partition_scheme" ]]; then
+          checkmbr_signature $windisk
+     elif [[ "$wptscheme" == "GUID_partition_scheme" ]]; then
+          if [[ ! -z $(sudo fdisk "$windisk" | grep -E '2:|3:|4:' | grep -v unused) ]]; then
+             if [[ "$virtual" == "true" ]]; then umount_vpart; fi
+             echo -e "${BGTYELLOW}Hybrid MBR detected on $windisk but firmware mode is UEFI.${NC}"
+             echo -e "${RED}This configuration is not compatible with Windows in UEFI mode.${NC}"
+             exit 1
+          fi
      fi
      if [[ "$virtual" == "true" && "$vptscheme" == "FDisk_partition_scheme" ]]; then
         checkmbr_signature $vrtdisk
      fi
-     efipart=$(diskutil info "$(basename "$syspath")" | grep "Device Node:" | awk '{print $3}')
-     efidisk=$(printf "$efipart" | sed 's/s[0-9]*$//')
-     if [[ "$efidisk" != "$windisk" ]]; then
+     mounted=$(diskutil info "$(basename "$syspath")" | grep "Mounted:" | awk '{print $2}')
+     if   [[ "$mounted" == "Yes" ]]; then
+          efipart=$(diskutil info "$(basename "$syspath")" | grep "Device Node:" | awk '{print $3}')
+     elif [[ "$mounted" == "No" ]]; then
+          efipart=$(diskutil info "$syspath" | grep "Device Node:" | awk '{print $3}')
+     else
+          if [[ "$virtual" == "true" ]]; then umount_vpart; fi
+          echo -e "${RED}Unable to get mount status of $syspath${NC}"
+          exit 1
+     fi
+     if   [[ ! -z "$efipart" ]]; then
+          efidisk=$(printf "$efipart" | sed 's/s[0-9]*$//')
+     else
+          if [[ "$virtual" == "true" ]]; then umount_vpart; fi
+          echo -e "${RED}Unable to get block device for $syspath${NC}"
+          exit 1
+     fi
+     rootfstype=$(diskutil info / | grep "Type (Bundle):" | awk '{print $NF}')
+     if   [[ "$rootfstype" == "apfs" ]]; then
+          macdisk=$(diskutil info / | grep "APFS Physical Store:" | awk '{print $NF}' | sed 's/s[0-9]*$//')
+     elif [[ "$rootfstype" == "hfs" ]]; then
+          macdisk=$(diskutil info / | grep "Part of Whole:" | awk '{print $NF}')
+     fi
+     if [[ "$efidisk" == "/dev/$macdisk" ]]; then
+        if   [[ ! -z $(csrutil status | grep "Filesystem Protections: enabled") ||
+                ! -z $(csrutil status | grep -Fx "System Integrity Protection status: enabled.") ]]; then
+             if [[ "$virtual" == "true" ]]; then umount_vpart; fi
+             echo -e "${RED}Unable to get device information from startup disk.${NC}"
+             echo "Disable SIP filesystem protections or specify a system volume."
+             exit 1
+        elif [[ ! -z $(sudo fdisk "/dev/$macdisk" | grep -E '2:|3:|4:' | grep -v unused) ]]; then
+             if [[ "$virtual" == "true" ]]; then umount_vpart; fi
+             echo -e "${BGTYELLOW}Hybrid MBR detected on /dev/$macdisk but firmware mode is UEFI.${NC}"
+             echo -e "${RED}This configuration is not compatible with Windows in UEFI mode.${NC}"
+             exit 1
+        fi
+     fi
+     if [[ "$efidisk" != "$windisk" && "$efidisk" != "/dev/$macdisk" ]]; then
         sptscheme=$(diskutil info $efidisk | grep "Content (IOContent):" | awk '{print $3}')
         if [[ "$sptscheme" == "FDisk_partition_scheme" ]]; then checkmbr_signature $efidisk; fi
+        if [[ "$sptscheme" == "GUID_partition_scheme" ]]; then
+           if [[ ! -z $(sudo fdisk "$efidisk" | grep -E '2:|3:|4:' | grep -v unused) ]]; then
+              if [[ "$virtual" == "true" ]]; then umount_vpart; fi
+              echo -e "${BGTYELLOW}Hybrid MBR detected on $efidisk but firmware mode is UEFI.${NC}"
+              echo -e "${RED}This configuration is not compatible with Windows in UEFI mode.${NC}"
+              exit 1
+           fi
+        fi
      fi
      efifsvendor=$(diskutil info $efipart | grep "File System Personality:" | awk '{print $(NF - 1)}')
      efifstype=$(diskutil info $efipart | grep "File System Personality:" | awk '{print $NF}')
      if [[ "$efifstype" == "NTFS" ]]; then
         espvolronly=$(diskutil info $efipart | grep "Volume Read-Only:" | awk '{print $3}')
-        if  [[ "$espvolronly" == "Yes" && ! -z $(command -v ntfs-3g) ]]; then
-            rmsysmnt="true"
-            diskutil unmount $efipart > /dev/null
-            mount_ntfs3g $efipart
-        else
-            echo -e "${BGTYELLOW}NTFS write support required to access $efipart${NC}"
-            echo -e "${RED}Please remount ESP for write access.${NC}"
-            if [[ "$virtual" == "true" ]]; then umount_vpart; fi
-            exit 1
+        if  [[ "$espvolronly" == "Yes" ]]; then
+            if  [[ ! -z $(command -v ntfs-3g) ]]; then
+                rmsysmnt="true"
+                diskutil unmount $efipart > /dev/null
+                mount_ntfs3g $efipart
+            else
+                if [[ "$virtual" == "true" ]]; then umount_vpart; fi
+                echo -e "${BGTYELLOW}NTFS write support required to access $efipart${NC}"
+                echo -e "${RED}Please remount ESP for write access.${NC}"
+                exit 1
+            fi
         fi
      fi
 elif [[ "$firmware" == "bios" || "$firmware" == "both" ]]; then
-     syspart=$(diskutil info "$(basename "$syspath")" | grep "Device Node:" | awk '{print $3}')
-     sysdisk=$(printf "$syspart" | sed 's/s[0-9]*$//')
      echo "Checking block device for active partition (sudo required)..."
-     if [[ "$wptscheme" == "FDisk_partition_scheme" ]]; then
-        checkmbr_signature $windisk
+     mounted=$(diskutil info "$(basename "$syspath")" | grep "Mounted:" | awk '{print $2}')
+     if   [[ "$mounted" == "Yes" ]]; then
+          syspart=$(diskutil info "$(basename "$syspath")" | grep "Device Node:" | awk '{print $3}')
+     elif [[ "$mounted" == "No" ]]; then
+          syspart=$(diskutil info "$syspath" | grep "Device Node:" | awk '{print $3}')
+     else
+          if [[ "$virtual" == "true" ]]; then umount_vpart; fi
+          echo -e "${RED}Unable to get mount status of $syspath${NC}"
+          exit 1
+     fi
+     if   [[ ! -z "$syspart" ]]; then
+          sysdisk=$(printf "$syspart" | sed 's/s[0-9]*$//')
+     else
+          if [[ "$virtual" == "true" ]]; then umount_vpart; fi
+          echo -e "${RED}Unable to get block device for $syspath${NC}"
+          exit 1
+     fi
+     if   [[ "$wptscheme" == "FDisk_partition_scheme" ]]; then
+          checkmbr_signature $windisk
+     elif [[ "$wptscheme" == "GUID_partition_scheme" ]]; then
+          if   [[ ! -z $(sudo fdisk "$windisk" | grep -E '2:|3:|4:' | grep -v unused) ]]; then
+               if   [[ "$verbose" == "true" && "$firmware" == "bios" ]]; then
+                    echo "Hybrid MBR detected on $windisk"
+               elif [[ "$firmware" == "both" ]]; then
+                    if [[ "$virtual" == "true" ]]; then umount_vpart; fi
+                    echo -e "${BGTYELLOW}Hybrid MBR detected on $windisk but firmware mode is BOTH.${NC}"
+                    echo -e "${RED}This configuration is not compatible with Windows in UEFI mode.${NC}"
+                    exit 1
+               fi
+               checkmbr_signature $windisk
+          else
+               if [[ "$virtual" == "true" ]]; then umount_vpart; fi
+               echo -e "${BGTYELLOW}Windows disk $windisk is using GPT partition scheme.${NC}"
+               echo -e "${RED}This configuration is not compatible with Windows in BIOS mode.${NC}"
+               exit 1
+          fi
      fi
      if [[ "$virtual" == "true" && "$vptscheme" == "FDisk_partition_scheme" ]]; then
         checkmbr_signature $vrtdisk
      fi
-     if [[ "$sysdisk" != "$windisk" ]]; then
-        sptscheme=$(diskutil info $sysdisk | grep "Content (IOContent):" | awk '{print $3}')
-        if [[ "$sptscheme" == "FDisk_partition_scheme" ]]; then checkmbr_signature $sysdisk; fi
+     rootfstype=$(diskutil info / | grep "Type (Bundle):" | awk '{print $NF}')
+     if   [[ "$rootfstype" == "apfs" ]]; then
+          macdisk=$(diskutil info / | grep "APFS Physical Store:" | awk '{print $NF}' | sed 's/s[0-9]*$//')
+     elif [[ "$rootfstype" == "hfs" ]]; then
+          macdisk=$(diskutil info / | grep "Part of Whole:" | awk '{print $NF}')
      fi
-     actpnum=$(sudo fdisk "$sysdisk" | grep -E '\*[0-9]' | awk '{print $1}' | sed 's/\*//;s/\://')
+     if   [[ "$sysdisk" == "/dev/$macdisk" ]]; then
+          if   [[ ! -z $(csrutil status | grep "Filesystem Protections: enabled") ||
+                  ! -z $(csrutil status | grep -Fx "System Integrity Protection status: enabled.") ]]; then
+               if [[ "$virtual" == "true" ]]; then umount_vpart; fi
+               echo -e "${RED}Unable to get device information from startup disk.${NC}"
+               echo "Disable SIP filesystem protections or specify a system volume."
+               exit 1
+          elif [[ ! -z $(sudo fdisk "/dev/$macdisk" | grep -E '2:|3:|4:' | grep -v unused) ]]; then
+               if   [[ "$verbose" == "true" && "$firmware" == "bios" ]]; then
+                    echo "Hybrid MBR detected on $macdisk"
+               elif [[ "$firmware" == "both" ]]; then
+                    if [[ "$virtual" == "true" ]]; then umount_vpart; fi
+                    echo -e "${BGTYELLOW}Hybrid MBR detected on /dev/$macdisk but firmware mode is BOTH.${NC}"
+                    echo -e "${RED}This configuration is not compatible with Windows in UEFI mode.${NC}"
+                    exit 1
+               fi
+               checkmbr_signature /dev/$macdisk
+               actpsect=$(sudo fdisk "/dev/$macdisk" | grep -E '\*[0-9]' | awk '{print $11}')
+               actpnum=$(sudo gpt show "/dev/$macdisk" 2> /dev/null | grep -w "$actpsect" | awk '{print $3}')
+          else
+               if [[ "$virtual" == "true" ]]; then umount_vpart; fi
+               echo -e "${BGTYELLOW}Startup disk /dev/$macdisk is using GPT partition scheme.${NC}"
+               echo -e "${RED}This configuration is not compatible with Windows in BIOS mode.${NC}"
+               exit 1
+          fi
+     elif [[ "$sysdisk" == "$windisk" ]]; then
+          if   [[ "$wptscheme" == "FDisk_partition_scheme" ]]; then
+               actpnum=$(sudo fdisk "$windisk" | grep -E '\*[0-9]' | awk '{print $1}' | sed 's/\*//;s/\://')
+          elif [[ "$wptscheme" == "GUID_partition_scheme" ]]; then
+               actpsect=$(sudo fdisk "$windisk" | grep -E '\*[0-9]' | awk '{print $11}')
+               actpnum=$(sudo gpt show "$windisk" 2> /dev/null | grep -w "$actpsect" | awk '{print $3}')
+          fi
+     else
+          sptscheme=$(diskutil info $sysdisk | grep "Content (IOContent):" | awk '{print $3}')
+          if   [[ "$sptscheme" == "FDisk_partition_scheme" ]]; then
+               checkmbr_signature $sysdisk
+               actpnum=$(sudo fdisk "$windisk" | grep -E '\*[0-9]' | awk '{print $1}' | sed 's/\*//;s/\://')
+          elif [[ "$sptscheme" == "GUID_partition_scheme" ]]; then
+               if   [[ ! -z $(sudo fdisk "$sysdisk" | grep -E '2:|3:|4:' | grep -v unused) ]]; then
+                    if   [[ "$verbose" == "true" && "$firmware" == "bios" ]]; then
+                         echo "Hybrid MBR detected on $sysdisk"
+                    elif [[ "$firmware" == "both" ]]; then
+                         if [[ "$virtual" == "true" ]]; then umount_vpart; fi
+                         echo -e "${BGTYELLOW}Hybrid MBR detected on $sysdisk but firmware mode is BOTH.${NC}"
+                         echo -e "${RED}This configuration is not compatible with Windows in UEFI mode.${NC}"
+                         exit 1
+                    fi
+                    checkmbr_signature $sysdisk
+                    actpsect=$(sudo fdisk "$sysdisk" | grep -E '\*[0-9]' | awk '{print $11}')
+                    actpnum=$(sudo gpt show "$sysdisk" 2> /dev/null | grep -w "$actpsect" | awk '{print $3}')
+               else
+                    if [[ "$virtual" == "true" ]]; then umount_vpart; fi
+                    echo -e "${BGTYELLOW}System disk $sysdisk is using GPT partition scheme.${NC}"
+                    echo -e "${RED}This configuration is not compatible with Windows in BIOS mode.${NC}"
+                    exit 1
+               fi
+          fi
+     fi
      if [[ -z "$actpnum" ]]; then
-        echo -e "${RED}No active partition on $sysdisk.${NC}"
         if [[ "$virtual" == "true" ]]; then umount_vpart; fi
+        echo -e "${RED}No active partition on $sysdisk.${NC}"
         exit 1
      fi
      actpart="$sysdisk"s"$actpnum"
      if [[ "$syspart" != "$actpart" ]]; then
-        echo -e "${RED}The volume $syspath on $syspart is not the active partition.${NC}"
         if [[ "$virtual" == "true" ]]; then umount_vpart; fi
+        echo -e "${RED}The volume $syspath on $syspart is not the active partition.${NC}"
         exit 1
      fi
      sysfsvendor=$(diskutil info $syspart | grep "File System Personality:" | awk '{print $(NF - 1)}')
      sysfstype=$(diskutil info $syspart | grep "File System Personality:" | awk '{print $NF}')
      if [[ "$sysfstype" == "NTFS" ]]; then
         sysvolronly=$(diskutil info $syspart | grep "Volume Read-Only:" | awk '{print $3}')
-        if  [[ "$sysvolronly" == "Yes" && ! -z $(command -v ntfs-3g) ]]; then
-            rmsysmnt="true"
-            diskutil unmount $syspart > /dev/null
-            mount_ntfs3g $syspart
-        else
-            echo -e "${BGTYELLOW}NTFS write support required to access $syspart${NC}"
-            echo -e "${RED}Please remount active partition for write access.${NC}"
-            if [[ "$virtual" == "true" ]]; then umount_vpart; fi
-            exit 1
+        if  [[ "$sysvolronly" == "Yes" ]]; then
+            if  [[ ! -z $(command -v ntfs-3g) ]]; then
+                rmsysmnt="true"
+                diskutil unmount $syspart > /dev/null
+                mount_ntfs3g $syspart
+            else
+                if [[ "$virtual" == "true" ]]; then umount_vpart; fi
+                echo -e "${BGTYELLOW}NTFS write support required to access $syspart${NC}"
+                echo -e "${RED}Please remount active partition for write access.${NC}"
+                exit 1
+            fi
         fi
      fi
      if [[ "$firmware" == "both" ]]; then
@@ -498,6 +764,9 @@ if [[ "$sigbytes" == "00000000" || -z "$sigbytes" ]]; then
    if [[ "$1" == "$windisk" ]]; then target="Windows"; fi
    if [[ "$1" == "$efidisk" || "$1" == "$sysdisk" ]]; then target="system"; fi
    if [[ "$1" == "$vrtdisk" ]]; then target="virtual"; fi
+   if [[ "$1" == "/dev/$macdisk" ]]; then target="startup"; fi
+   if [[ "$1" == "/dev/disk0" ]]; then target="first"; fi
+   if [[ "$virtual" == "true" ]]; then umount_vpart; fi
    echo -e "${RED}No disk signature found on the $target disk.${NC}"
    echo "Create a Windows Disk Signature using signmbr or ms-sys."
    exit 1
@@ -617,19 +886,48 @@ fi
 # Check source for path to the WBM files then get the block device.
 # Get the mount point, file path and block device that contains the virtual disk file.
 if   [[ -d "$winpath/Windows/Boot" ]]; then
-     windisk=$(diskutil info "$(basename "$winpath")" | grep "Device Node:" | awk '{print $3}' | sed 's/s[0-9]*$//')
+     mounted=$(diskutil info "$(basename "$winpath")" | grep "Mounted:" | awk '{print $2}')
+     if   [[ "$mounted" == "Yes" ]]; then
+          windisk=$(diskutil info "$(basename "$winpath")" | grep "Device Node:" | awk '{print $3}' | sed 's/s[0-9]*$//')
+     elif [[ "$mounted" == "No" ]]; then
+          windisk=$(diskutil info "$winpath" | grep "Device Node:" | awk '{print $3}' | sed 's/s[0-9]*$//')
+     else
+          if [[ "$virtual" == "true" ]]; then umount_vpart; fi
+          echo -e "${RED}Unable to get mount status for $winpath${NC}"
+          exit 1
+     fi
+     if [[ -z "$windisk" ]]; then
+        if [[ "$virtual" == "true" ]]; then umount_vpart; fi
+        echo -e "${RED}Unable to get block device for $winpath${NC}"
+        exit 1
+     fi
 elif [[ "$virtual" == "true" && -d "$vrtpath/Windows/Boot" ]]; then
      winpath=$(echo "$winpath" | cut -d/ -f1-3)
-     windisk=$(diskutil info "$(basename "$winpath")" | grep "Device Node:" | awk '{print $3}' | sed 's/s[0-9]*$//')
      imgstring=$(echo "$imgpath" | cut -d/ -f4- | sed 's/^/\\/;s/\//\\/g')
+     mounted=$(diskutil info "$(basename "$winpath")" | grep "Mounted:" | awk '{print $2}')
+     if   [[ "$mounted" == "Yes" ]]; then
+          windisk=$(diskutil info "$(basename "$winpath")" | grep "Device Node:" | awk '{print $3}' | sed 's/s[0-9]*$//')
+     elif [[ "$mounted" == "No" ]]; then
+          windisk=$(diskutil info "$winpath" | grep "Device Node:" | awk '{print $3}' | sed 's/s[0-9]*$//')
+     else
+          if [[ "$virtual" == "true" ]]; then umount_vpart; fi
+          echo -e "${RED}Unable to get mount status for $winpath${NC}"
+          exit 1
+     fi
+     if [[ -z "$windisk" ]]; then
+        if [[ "$virtual" == "true" ]]; then umount_vpart; fi
+        echo -e "${RED}Unable to get block device for $winpath${NC}"
+        exit 1
+     fi
 else
-    echo -e "${RED}Invalid source path please try again.${NC}"
-    if  [[ "$virtual" == "true" ]]; then umount_vpart; fi
-    exit 1
+     echo -e "${RED}Invalid source path please try again.${NC}"
+     if  [[ "$virtual" == "true" ]]; then umount_vpart; fi
+     exit 1
 fi
 
 # Get the partition scheme of media containing a Windows installation or VHDX file.
 wptscheme=$(diskutil info $windisk | grep "Content (IOContent):" | awk '{print $3}')
+winhybrid="false"
 
 # Perform the actions appropriate for the specified firmware type.
 # Compare the WBM product versions of the source and system volumes.
@@ -797,12 +1095,17 @@ else
        sysbtmgr="false"
        sysuwfpath="$syspath/Boot/bootuwf.dll"
        sysvhdpath="$syspath/Boot/bootvhd.dll"
+       sysmempath="$syspath/Boot/memtest.exe"
        if  [[ "$virtual" == "true" ]]; then
            localuwfpath="$vrtpath/Windows/Boot/PCAT/bootuwf.dll"
            localvhdpath="$vrtpath/Windows/Boot/PCAT/bootvhd.dll"
+           localmempath="$vrtpath/Windows/Boot/PCAT/memtest.exe"
+           localmgrpath="$vrtpath/Windows/Boot/PCAT/bootmgr"
        else
            localuwfpath="$winpath/Windows/Boot/PCAT/bootuwf.dll"
            localvhdpath="$winpath/Windows/Boot/PCAT/bootvhd.dll"
+           localmempath="$winpath/Windows/Boot/PCAT/memtest.exe"
+           localmgrpath="$winpath/Windows/Boot/PCAT/bootmgr"
        fi
        if [[ "$sysfsvendor" != "MS-DOS" ]]; then
           if [[ "$sysfstype" != "NTFS" && "$sysfstype" != "UFSD_NTFS" ]]; then
@@ -813,9 +1116,13 @@ else
               exit 1
           fi
        fi
-       if  [[ -f "$localuwfpath" && -f "$localvhdpath" ]]; then
-           localuwfver=$(peres -v "$localuwfpath" | grep 'Product Version:' | awk '{print $3}')
-           localvhdver=$(peres -v "$localvhdpath" | grep 'Product Version:' | awk '{print $3}')
+       if   [[ -f "$localmgrpath" && -f "$localuwfpath" && -f "$localvhdpath" ]]; then
+            localuwfver=$(peres -v "$localuwfpath" 2> /dev/null | grep 'Product Version:' | awk '{print $3}')
+            localvhdver=$(peres -v "$localvhdpath" 2> /dev/null | grep 'Product Version:' | awk '{print $3}')
+       elif [[ -f "$localmgrpath" && -f "$localmempath" ]]; then
+            localmemver=$(peres -v "$localmempath" 2> /dev/null | grep 'Product Version:' | awk '{print $3}')
+            localuwfver="NULL"
+            localvhdver="NULL"
        else
            if  [[ "$virtual" == "true" ]]; then
                echo -e "${RED}Unable to find the BIOS boot files at $vrtpath${NC}"
@@ -826,12 +1133,17 @@ else
            if [[ "$rmsysmnt" == "true" ]]; then umount_system; fi
            exit 1
        fi
-       if [[ -f "$sysuwfpath" && -f "$sysvhdpath" ]]; then
-          sysuwfver=$(peres -v "$sysuwfpath" | grep 'Product Version:' | awk '{print $3}')
-          sysvhdver=$(peres -v "$sysvhdpath" | grep 'Product Version:' | awk '{print $3}')
-          sysbtmgr="true"
+       if   [[ -f "$syspath/bootmgr" && -f "$sysuwfpath" && -f "$sysvhdpath" ]]; then
+            sysuwfver=$(peres -v "$sysuwfpath" 2> /dev/null | grep 'Product Version:' | awk '{print $3}')
+            sysvhdver=$(peres -v "$sysvhdpath" 2> /dev/null | grep 'Product Version:' | awk '{print $3}')
+            sysbtmgr="true"
+       elif [[ -f "$syspath/bootmgr" && -f "$sysmempath" ]]; then
+            sysmemver=$(peres -v "$sysmempath" 2> /dev/null | grep 'Product Version:' | awk '{print $3}')
+            sysuwfver="NULL"
+            sysvhdver="NULL"
+            sysbtmgr="true"
        fi
-       if [[ ! -f "$sysuwfpath" && ! -f "$sysvhdpath" ]]; then
+       if [[ "$sysbtmgr" == "false" ]]; then
           if  [[ "$virtual" == "true" ]]; then
               copy_bootmgr "$vrtpath" "$syspath" "$fwmode" "$sysfstype"
           else
@@ -842,35 +1154,65 @@ else
        elif [[ "$sysbtmgr" == "true" && "$clean" == "true" ]]; then
             if [[ "$verbose" == "true" ]]; then echo "Remove current BCD store..."; fi
             rm -f "$syspath"/Boot/BCD
-            if [[ "$sysuwfver" != "$localuwfver" || "$sysvhdver" != "$localvhdver" ]]; then
-               if [[ $(printf "$sysuwfver\n$localuwfver\n" | sort -rV | head -1) == "$localuwfver" ||
-                     $(printf "$sysvhdver\n$localvhdver\n" | sort -rV | head -1) == "$localvhdver" ]]; then
-                  rm -rf "$syspath/Boot" && rm -f "$syspath/bootmgr $syspath/bootnxt"
-                  if  [[ "$virtual" == "true" ]]; then
-                      copy_bootmgr "$vrtpath" "$syspath" "$fwmode" "$sysfstype"
-                  else
-                      copy_bootmgr "$winpath" "$syspath" "$fwmode" "$sysfstype"
-                  fi
-               fi
+            if   [[ "$sysuwfver" != "NULL" && "$sysvhdver" != "NULL" && "$localuwfver" != "NULL" && "$localvhdver" != "NULL" ]]; then
+                 if [[ "$sysuwfver" != "$localuwfver" || "$sysvhdver" != "$localvhdver" ]]; then
+                    if [[ $(printf "$sysuwfver\n$localuwfver\n" | sort -rV | head -1) == "$localuwfver" ||
+                          $(printf "$sysvhdver\n$localvhdver\n" | sort -rV | head -1) == "$localvhdver" ]]; then
+                       rm -rf "$syspath/Boot" && rm -f "$syspath/bootmgr $syspath/bootnxt"
+                       if  [[ "$virtual" == "true" ]]; then
+                           copy_bootmgr "$vrtpath" "$syspath" "$fwmode" "$sysfstype"
+                       else
+                           copy_bootmgr "$winpath" "$syspath" "$fwmode" "$sysfstype"
+                       fi
+                    fi
+                 fi
+            else
+                 if [[ "$sysmemver" != "$localmemver" ]]; then
+                    if [[ $(printf "$sysmemver\n$localmemver\n" | sort -rV | head -1) == "$localmemver" ]]; then
+                       rm -rf "$syspath/Boot" && rm -f "$syspath/bootmgr $syspath/bootnxt"
+                       if  [[ "$virtual" == "true" ]]; then
+                           copy_bootmgr "$vrtpath" "$syspath" "$fwmode" "$sysfstype"
+                       else
+                           copy_bootmgr "$winpath" "$syspath" "$fwmode" "$sysfstype"
+                       fi
+                    fi
+                 fi
             fi
             build_stores "$winpath" "$syspath" "$fwmode" "$setfwmod" "$createbcd" "$prewbmdef" \
                          "$prodname" "$locale" "$verbose" "$virtual" "$vrtpath" "$imgstring"
        else
             createbcd="false"
-            if [[ "$sysuwfver" != "$localuwfver" || "$sysvhdver" != "$localvhdver" ]]; then
-               if [[ $(printf "$sysuwfver\n$localuwfver\n" | sort -rV | head -1) == "$localuwfver" ||
-                     $(printf "$sysvhdver\n$localvhdver\n" | sort -rV | head -1) == "$localvhdver" ]]; then
-                  if [[ "$verbose" == "true" ]]; then echo "Backup current BCD store before update..."; fi
-                  mv "$syspath/Boot/BCD" "$syspath"
-                  rm -rf "$syspath/Boot" && rm -f "$syspath/bootmgr $syspath/bootnxt"
-                  if  [[ "$virtual" == "true" ]]; then
-                      copy_bootmgr "$vrtpath" "$syspath" "$fwmode" "$sysfstype"
-                  else
-                      copy_bootmgr "$winpath" "$syspath" "$fwmode" "$sysfstype"
-                  fi
-                  if [[ "$verbose" == "true" ]]; then echo "Restore current BCD store after update..."; fi
-                  mv "$syspath/BCD" "$syspath/Boot"
-               fi
+            if   [[ "$sysuwfver" != "NULL" && "$sysvhdver" != "NULL" && "$localuwfver" != "NULL" && "$localvhdver" != "NULL" ]]; then
+                 if [[ "$sysuwfver" != "$localuwfver" || "$sysvhdver" != "$localvhdver" ]]; then
+                    if [[ $(printf "$sysuwfver\n$localuwfver\n" | sort -rV | head -1) == "$localuwfver" ||
+                          $(printf "$sysvhdver\n$localvhdver\n" | sort -rV | head -1) == "$localvhdver" ]]; then
+                       if [[ "$verbose" == "true" ]]; then echo "Backup current BCD store before update..."; fi
+                       mv "$syspath/Boot/BCD" "$syspath"
+                       rm -rf "$syspath/Boot" && rm -f "$syspath/bootmgr $syspath/bootnxt"
+                       if  [[ "$virtual" == "true" ]]; then
+                           copy_bootmgr "$vrtpath" "$syspath" "$fwmode" "$sysfstype"
+                       else
+                           copy_bootmgr "$winpath" "$syspath" "$fwmode" "$sysfstype"
+                       fi
+                       if [[ "$verbose" == "true" ]]; then echo "Restore current BCD store after update..."; fi
+                       mv "$syspath/BCD" "$syspath/Boot"
+                    fi
+                 fi
+            else
+                 if [[ "$sysmemver" != "$localmemver" ]]; then
+                    if [[ $(printf "$sysmemver\n$localmemver\n" | sort -rV | head -1) == "$localmemver" ]]; then
+                       if [[ "$verbose" == "true" ]]; then echo "Backup current BCD store before update..."; fi
+                       mv "$syspath/Boot/BCD" "$syspath"
+                       rm -rf "$syspath/Boot" && rm -f "$syspath/bootmgr $syspath/bootnxt"
+                       if  [[ "$virtual" == "true" ]]; then
+                           copy_bootmgr "$vrtpath" "$syspath" "$fwmode" "$sysfstype"
+                       else
+                           copy_bootmgr "$winpath" "$syspath" "$fwmode" "$sysfstype"
+                       fi
+                       if [[ "$verbose" == "true" ]]; then echo "Restore current BCD store after update..."; fi
+                       mv "$syspath/BCD" "$syspath/Boot"
+                    fi
+                 fi
             fi
             update_winload "$winpath" "$syspath" "$fwmode" "$setfwmod" "$createbcd" "$prewbmdef" \
                            "$prodname" "$locale" "$verbose" "$virtual" "$vrtpath" "$imgstring"

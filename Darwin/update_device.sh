@@ -72,6 +72,11 @@ else
     part=$(diskutil info "$(basename "$mntpoint")" | grep "Device Node:" | awk '{print $3}')
     disk=$(printf $part | sed 's/s[0-9]*$//')
     scheme=$(diskutil info $disk | grep "Content (IOContent):" | awk '{print $3}')
+    if [[ "$scheme" == "GUID_partition_scheme" ]]; then
+       if [[ ! -z $(sudo fdisk "$disk" | grep -E '2:|3:|4:' | grep -v unused) ]]; then
+          scheme="FDisk_partition_scheme" #Use fdisk option for GPT disk with hybrid MBR.
+       fi
+    fi
 fi
 
 if  [[ "$virtual" == "true" ]]; then
