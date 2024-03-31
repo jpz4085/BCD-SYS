@@ -140,23 +140,34 @@ if   [[ "$3" == "uefi" ]]; then
      sudo mkdir -p "$2"/EFI/Microsoft/Recovery
      sudo cp -r "$1"/Windows/Boot/EFI "$2"/EFI/Microsoft/Boot
      sudo cp -r "$1"/Windows/Boot/Fonts "$2"/EFI/Microsoft/Boot
-     sudo cp -r "$1"/Windows/Boot/Resources "$2"/EFI/Microsoft/Boot
+     if sudo test -d "$1"/Windows/Boot/Resources; then
+        sudo cp -r "$1"/Windows/Boot/Resources "$2"/EFI/Microsoft/Boot
+     fi
 elif [[ "$3" == "bios" ]]; then
      if [[ "$verbose" == "true" ]]; then echo "Copy the BIOS boot files to the system partition..."; fi
      sudo cp -r "$1"/Windows/Boot/PCAT "$2"/Boot
      sudo cp -r "$1"/Windows/Boot/Fonts "$2"/Boot
-     sudo cp -r "$1"/Windows/Boot/Resources "$2"/Boot
-     sudo mv "$2"/Boot/bootmgr "$2" && sudo mv "$2"/Boot/bootnxt "$2"/BOOTNXT
+     if sudo test -d "$1"/Windows/Boot/Resources; then
+        sudo cp -r "$1"/Windows/Boot/Resources "$2"/Boot
+     fi
+     sudo mv "$2"/Boot/bootmgr "$2"
+     if sudo test -f "$1"/Windows/Boot/PCAT/bootnxt; then
+        sudo mv "$2"/Boot/bootnxt "$2"/BOOTNXT
+     fi
      if [[ "$4" == "ntfs" ]]; then
         if [[ "$verbose" == "true" ]]; then echo "Set extended NTFS attributes (Hidden/System/Read Only)..."; fi
         sudo setfattr -h -v 0x00000027 -n system.ntfs_attrib_be "$2"/bootmgr
-        sudo setfattr -h -v 0x00040026 -n system.ntfs_attrib_be "$2"/BOOTNXT
+        if sudo test -f "$1"/Windows/Boot/PCAT/bootnxt; then
+           sudo setfattr -h -v 0x00040026 -n system.ntfs_attrib_be "$2"/BOOTNXT
+        fi
         sudo setfattr -h -v 0x10000006 -n system.ntfs_attrib_be "$2"/Boot
      fi
      if [[ "$4" == "vfat" ]]; then
         if [[ "$verbose" == "true" ]]; then echo "Set filesystem attributes (Hidden/System/Read Only)..."; fi
         sudo fatattr +shr "$2"/bootmgr
-        sudo fatattr +sh "$2"/BOOTNXT
+        if sudo test -f "$1"/Windows/Boot/PCAT/bootnxt; then
+           sudo fatattr +sh "$2"/BOOTNXT
+        fi
         sudo fatattr +sh "$2"/Boot
      fi
 fi
@@ -164,6 +175,7 @@ fi
 
 # Used when no syspath is specified in the arguments.
 # Look for a system partition on the Windows disk, the first block device, or the root device.
+# Check for compatibility between the partition scheme and firmware mode.
 get_syspath () {
 firmware="$1"
 windisk="$2"
@@ -211,7 +223,10 @@ elif [[ "$firmware" == "bios" || "$firmware" == "both" ]]; then
      syspart=$(sudo sfdisk -o device,boot -l "$windisk" 2>/dev/null | grep -E '/dev/.*\*' | awk '{print $1}')
      errormsg=$(sudo sfdisk -o device,boot -l "$windisk" 2>&1>/dev/null)
      if [[ "$errormsg" == "sfdisk: gpt unknown column: boot" ]]; then
+        if [[ "$virtual" == "true" ]]; then umount_vpart; fi
         echo -e "${BGTYELLOW}Windows disk $windisk is using GPT partition scheme.${NC}"
+        echo -e "${RED}This configuration is not compatible with Windows in BIOS mode.${NC}"
+        exit 1
      fi
      if [[ -z "$syspart" ]]; then
         syspart=$(sudo sfdisk -o device,boot -l /dev/sda 2>/dev/null | grep -E '/dev/.*\*' | awk '{print $1}')
@@ -262,6 +277,7 @@ fi
 
 # Used when a syspath is provided in the arguments.
 # Find the block device (and active partition if BIOS/BOTH) for the specified mount point.
+# Check for compatibility between the partition scheme and firmware mode.
 get_device () {
 firmware="$1"
 syspath="$2"
@@ -278,7 +294,21 @@ elif [[ "$firmware" == "bios" || "$firmware" == "both" ]]; then
      if [[ "$virtual" == "false" || "$verbose" == "true" ]]; then
         echo "Checking block device for active partition (sudo required)..."
      fi
-     actpart=$(sudo sfdisk -o device,boot -l "$sysdisk" | grep -E '/dev/.*\*' | awk '{print $1}')
+     errormsg=$(sudo sfdisk -o device,boot -l "$windisk" 2>&1>/dev/null)
+     if [[ "$errormsg" == "sfdisk: gpt unknown column: boot" ]]; then
+        if [[ "$virtual" == "true" ]]; then umount_vpart; fi
+        echo -e "${BGTYELLOW}Windows disk $windisk is using GPT partition scheme.${NC}"
+        echo -e "${RED}This configuration is not compatible with Windows in BIOS mode.${NC}"
+        exit 1
+     fi
+     actpart=$(sudo sfdisk -o device,boot -l "$sysdisk" 2>/dev/null | grep -E '/dev/.*\*' | awk '{print $1}')
+     errormsg=$(sudo sfdisk -o device,boot -l "$sysdisk" 2>&1>/dev/null)
+     if [[ "$errormsg" == "sfdisk: gpt unknown column: boot" ]]; then
+        if [[ "$virtual" == "true" ]]; then umount_vpart; fi
+        echo -e "${BGTYELLOW}System disk $sysdisk is using GPT partition scheme.${NC}"
+        echo -e "${RED}This configuration is not compatible with Windows in BIOS mode.${NC}"
+        exit 1
+     fi
      if   [[ -z "$actpart" ]]; then
           echo -e "${RED}No active partition on $sysdisk.${NC}"
           if [[ "$virtual" == "true" ]]; then umount_vpart; fi
@@ -651,12 +681,17 @@ else
        sysbtmgr="false"
        sysuwfpath="$syspath/Boot/bootuwf.dll"
        sysvhdpath="$syspath/Boot/bootvhd.dll"
+       sysmempath="$syspath/Boot/memtest.exe"
        if  [[ "$virtual" == "true" ]]; then
            localuwfpath="$vrtpath/Windows/Boot/PCAT/bootuwf.dll"
            localvhdpath="$vrtpath/Windows/Boot/PCAT/bootvhd.dll"
+           localmempath="$vrtpath/Windows/Boot/PCAT/memtest.exe"
+           localmgrpath="$vrtpath/Windows/Boot/PCAT/bootmgr"
        else
            localuwfpath="$winpath/Windows/Boot/PCAT/bootuwf.dll"
            localvhdpath="$winpath/Windows/Boot/PCAT/bootvhd.dll"
+           localmempath="$winpath/Windows/Boot/PCAT/memtest.exe"
+           localmgrpath="$winpath/Windows/Boot/PCAT/bootmgr"
        fi
        if [[ "$sysfstype" != "vfat" && "$sysfstype" != "ntfs" ]]; then
           echo "Active partition $syspart is $sysfstype format."
@@ -665,9 +700,13 @@ else
           if [[ "$rmsysmnt" == "true" ]]; then umount_system; fi
           exit 1
        fi
-       if  [[ -f "$localuwfpath" && -f "$localvhdpath" ]]; then
-           localuwfver=$(peres -v "$localuwfpath" | grep 'Product Version:' | awk '{print $3}')
-           localvhdver=$(peres -v "$localvhdpath" | grep 'Product Version:' | awk '{print $3}')
+       if   [[ -f "$localmgrpath" && -f "$localuwfpath" && -f "$localvhdpath" ]]; then
+            localuwfver=$(peres -v "$localuwfpath" | grep 'Product Version:' | awk '{print $3}')
+            localvhdver=$(peres -v "$localvhdpath" | grep 'Product Version:' | awk '{print $3}')
+       elif [[ -f "$localmgrpath" && -f "$localmempath" ]]; then
+            localmemver=$(peres -v "$localmempath" | grep 'Product Version:' | awk '{print $3}')
+            localuwfver="NULL"
+            localvhdver="NULL"
        else
            if  [[ "$virtual" == "true" ]]; then
                echo -e "${RED}Unable to find the BIOS boot files at $vrtpath${NC}"
@@ -678,10 +717,15 @@ else
            if [[ "$rmsysmnt" == "true" ]]; then umount_system; fi           
            exit 1
        fi
-       if sudo test -f "$sysuwfpath" && sudo test -f "$sysvhdpath"; then
-          sysuwfver=$(sudo peres -v "$sysuwfpath" | grep 'Product Version:' | awk '{print $3}')
-          sysvhdver=$(sudo peres -v "$sysvhdpath" | grep 'Product Version:' | awk '{print $3}')
-          sysbtmgr="true"
+       if   sudo test -f "$syspath/bootmgr" && sudo test -f "$sysuwfpath" && sudo test -f "$sysvhdpath"; then
+            sysuwfver=$(sudo peres -v "$sysuwfpath" | grep 'Product Version:' | awk '{print $3}')
+            sysvhdver=$(sudo peres -v "$sysvhdpath" | grep 'Product Version:' | awk '{print $3}')
+            sysbtmgr="true"
+       elif sudo test -f "$syspath/bootmgr" && sudo test -f "$sysmempath"; then
+            sysmemver=$(peres -v "$sysmempath" | grep 'Product Version:' | awk '{print $3}')
+            sysuwfver="NULL"
+            sysvhdver="NULL"
+            sysbtmgr="true"
        fi
        if ! sudo test -f "$sysuwfpath" && ! sudo test -f "$sysvhdpath"; then
           if  [[ "$virtual" == "true" ]]; then
@@ -694,35 +738,65 @@ else
        elif [[ "$sysbtmgr" == "true" && "$clean" == "true" ]]; then
             if [[ "$verbose" == "true" ]]; then echo "Remove current BCD store..."; fi
             sudo rm -f "$syspath"/Boot/BCD
-            if [[ "$sysuwfver" != "$localuwfver" || "$sysvhdver" != "$localvhdver" ]]; then
-               if [[ $(printf "$sysuwfver\n$localuwfver\n" | sort -rV | head -1) == "$localuwfver" ||
-                     $(printf "$sysvhdver\n$localvhdver\n" | sort -rV | head -1) == "$localvhdver" ]]; then
-                  sudo rm -rf "$syspath/Boot" && sudo rm -f "$syspath/bootmgr $syspath/bootnxt"
-                  if  [[ "$virtual" == "true" ]]; then
-                      copy_bootmgr "$vrtpath" "$syspath" "$fwmode" "$sysfstype"
-                  else
-                      copy_bootmgr "$winpath" "$syspath" "$fwmode" "$sysfstype"
-                  fi
-               fi
+            if   [[ "$sysuwfver" != "NULL" && "$sysvhdver" != "NULL" && "$localuwfver" != "NULL" && "$localvhdver" != "NULL" ]]; then
+                 if [[ "$sysuwfver" != "$localuwfver" || "$sysvhdver" != "$localvhdver" ]]; then
+                    if [[ $(printf "$sysuwfver\n$localuwfver\n" | sort -rV | head -1) == "$localuwfver" ||
+                          $(printf "$sysvhdver\n$localvhdver\n" | sort -rV | head -1) == "$localvhdver" ]]; then
+                       sudo rm -rf "$syspath/Boot" && sudo rm -f "$syspath/bootmgr $syspath/bootnxt"
+                       if  [[ "$virtual" == "true" ]]; then
+                           copy_bootmgr "$vrtpath" "$syspath" "$fwmode" "$sysfstype"
+                       else
+                           copy_bootmgr "$winpath" "$syspath" "$fwmode" "$sysfstype"
+                       fi
+                    fi
+                 fi
+            else
+                 if [[ "$sysmemver" != "$localmemver" ]]; then
+                    if [[ $(printf "$sysmemver\n$localmemver\n" | sort -rV | head -1) == "$localmemver" ]]; then
+                       sudo rm -rf "$syspath/Boot" && rm -f "$syspath/bootmgr $syspath/bootnxt"
+                       if  [[ "$virtual" == "true" ]]; then
+                           copy_bootmgr "$vrtpath" "$syspath" "$fwmode" "$sysfstype"
+                       else
+                           copy_bootmgr "$winpath" "$syspath" "$fwmode" "$sysfstype"
+                       fi
+                    fi
+                 fi
             fi
             build_stores "$winpath" "$syspath" "$fwmode" "$setfwmod" "$createbcd" "$prewbmdef" \
                          "$prodname" "$locale" "$verbose" "$virtual" "$vrtpath" "$imgstring"
        else
             createbcd="false"
-            if [[ "$sysuwfver" != "$localuwfver" || "$sysvhdver" != "$localvhdver" ]]; then
-               if [[ $(printf "$sysuwfver\n$localuwfver\n" | sort -rV | head -1) == "$localuwfver" ||
-                     $(printf "$sysvhdver\n$localvhdver\n" | sort -rV | head -1) == "$localvhdver" ]]; then
-                  if [[ "$verbose" == "true" ]]; then echo "Backup current BCD store before update..."; fi
-                  sudo mv "$syspath/Boot/BCD" "$syspath"
-                  sudo rm -rf "$syspath/Boot" && sudo rm -f "$syspath/bootmgr $syspath/bootnxt"
-                  if  [[ "$virtual" == "true" ]]; then
-                      copy_bootmgr "$vrtpath" "$syspath" "$fwmode" "$sysfstype"
-                  else
-                      copy_bootmgr "$winpath" "$syspath" "$fwmode" "$sysfstype"
-                  fi
-                  if [[ "$verbose" == "true" ]]; then echo "Restore current BCD store after update..."; fi
-                  sudo mv "$syspath/BCD" "$syspath/Boot"
-               fi
+            if   [[ "$sysuwfver" != "NULL" && "$sysvhdver" != "NULL" && "$localuwfver" != "NULL" && "$localvhdver" != "NULL" ]]; then
+                 if [[ "$sysuwfver" != "$localuwfver" || "$sysvhdver" != "$localvhdver" ]]; then
+                    if [[ $(printf "$sysuwfver\n$localuwfver\n" | sort -rV | head -1) == "$localuwfver" ||
+                          $(printf "$sysvhdver\n$localvhdver\n" | sort -rV | head -1) == "$localvhdver" ]]; then
+                       if [[ "$verbose" == "true" ]]; then echo "Backup current BCD store before update..."; fi
+                       sudo mv "$syspath/Boot/BCD" "$syspath"
+                       sudo rm -rf "$syspath/Boot" && sudo rm -f "$syspath/bootmgr $syspath/bootnxt"
+                       if  [[ "$virtual" == "true" ]]; then
+                           copy_bootmgr "$vrtpath" "$syspath" "$fwmode" "$sysfstype"
+                       else
+                           copy_bootmgr "$winpath" "$syspath" "$fwmode" "$sysfstype"
+                       fi
+                       if [[ "$verbose" == "true" ]]; then echo "Restore current BCD store after update..."; fi
+                       sudo mv "$syspath/BCD" "$syspath/Boot"
+                    fi
+                 fi
+            else
+                 if [[ "$sysmemver" != "$localmemver" ]]; then
+                    if [[ $(printf "$sysmemver\n$localmemver\n" | sort -rV | head -1) == "$localmemver" ]]; then
+                       if [[ "$verbose" == "true" ]]; then echo "Backup current BCD store before update..."; fi
+                       sudo mv "$syspath/Boot/BCD" "$syspath"
+                       sudo rm -rf "$syspath/Boot" && rm -f "$syspath/bootmgr $syspath/bootnxt"
+                       if  [[ "$virtual" == "true" ]]; then
+                           copy_bootmgr "$vrtpath" "$syspath" "$fwmode" "$sysfstype"
+                       else
+                           copy_bootmgr "$winpath" "$syspath" "$fwmode" "$sysfstype"
+                       fi
+                       if [[ "$verbose" == "true" ]]; then echo "Restore current BCD store after update..."; fi
+                       sudo mv "$syspath/BCD" "$syspath/Boot"
+                    fi
+                 fi
             fi
             update_winload "$winpath" "$syspath" "$fwmode" "$setfwmod" "$createbcd" "$prewbmdef" \
                            "$prodname" "$locale" "$verbose" "$virtual" "$vrtpath" "$imgstring"
