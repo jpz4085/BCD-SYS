@@ -89,6 +89,11 @@ if  [[ "$virtual" == "true" ]]; then
     elif [[ "$vtscheme" == "FDisk_partition_scheme" ]]; then
          vtdisksig=$(sudo xxd -u -p -s 440 -l 4 $virtdisk)
          vtpartoffset=$(diskutil info $virtpart | grep "Partition Offset:" | awk '{print $3}')
+         if [[ -z $vtpartoffset ]]; then
+            hidsect=$(sudo fdisk $virtdisk | tail -n +6 | awk -v partnum=${virtpart##*s} 'FNR == partnum {print $11}')
+            sectsize=$(blksize $virtdisk)
+            vtpartoffset=$(($sectsize * $hidsect))
+         fi
          vtdiskbytes=$(printf "%s" $(printf "%x%024x" "0x$vtdisksig") | sed 's/.\{2\}/&,/g;s/,$//')
          vtpartbytes=$(printf "%s" $(endian $(printf "%032x" "$vtpartoffset")) | sed 's/.\{2\}/&,/g;s/,$//')
          vtschemebyte="01"
@@ -102,6 +107,11 @@ if  [[ "$virtual" == "true" ]]; then
     elif [[ "$pyscheme" == "FDisk_partition_scheme" ]]; then
          pydisksig=$(sudo xxd -u -p -s 440 -l 4 $physdisk)
          pypartoffset=$(diskutil info $physpart | grep "Partition Offset:" | awk '{print $3}')
+         if [[ -z $pypartoffset ]]; then
+            hidsect=$(sudo fdisk $physdisk | tail -n +6 | awk -v partnum=${physpart##*s} 'FNR == partnum {print $11}')
+            sectsize=$(blksize $physdisk)
+            pypartoffset=$(($sectsize * $hidsect))
+         fi
          pydiskbytes=$(printf "%s" $(printf "%x%024x" "0x$pydisksig") | sed 's/.\{2\}/&,/g;s/,$//')
          pypartbytes=$(printf "%s" $(endian $(printf "%032x" "$pypartoffset")) | sed 's/.\{2\}/&,/g;s/,$//')
          pyschemebyte="01"
@@ -124,6 +134,11 @@ else
     elif [[ "$scheme" == "FDisk_partition_scheme" ]]; then
          disksig=$(sudo xxd -u -p -s 440 -l 4 $disk)
          partoffset=$(diskutil info $part | grep "Partition Offset:" | awk '{print $3}')
+         if [[ -z $partoffset ]]; then
+            hidsect=$(sudo fdisk $disk | tail -n +6 | awk -v partnum=${part##*s} 'FNR == partnum {print $11}')
+            sectsize=$(blksize $disk)
+            partoffset=$(($sectsize * $hidsect))
+         fi
          diskbytes=$(printf "%s" $(printf "%x%024x" "0x$disksig") | sed 's/.\{2\}/&,/g;s/,$//')
          partbytes=$(printf "%s" $(endian $(printf "%032x" "$partoffset")) | sed 's/.\{2\}/&,/g;s/,$//')
          schemebyte="01"
