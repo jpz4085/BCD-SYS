@@ -977,9 +977,11 @@ else
           syswbmver=$(peres -v "$syswbmpath" 2> /dev/null | grep 'Product Version:' | awk '{print $3}')
           localwbmver=$(peres -v "$localwbmpath" 2> /dev/null | grep 'Product Version:' | awk '{print $3}')
        fi
-       if [[ ! -z $(command -v bootoption) && ! -z $(csrutil status | grep "NVRAM Protections: disabled") ]]; then
-          get_wbmoption && efibootvars="true"
-          wbmefipath="$syspath/EFI/Microsoft/Boot/bootmgfw.efi"
+       if   [[ ! -z $(command -v bootoption) && ! -z $(csrutil status | grep "NVRAM Protections: disabled") ]]; then
+            get_wbmoption && efibootvars="true"
+            wbmefipath="$syspath/EFI/Microsoft/Boot/bootmgfw.efi"
+       else
+           setfwmod="true"
        fi
        if   [[ ! -f "$localwbmpath" ]]; then
             if  [[ "$virtual" == "true" ]]; then
