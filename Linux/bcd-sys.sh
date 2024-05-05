@@ -191,7 +191,7 @@ if   [[ "$firmware" == "uefi" ]]; then
         efidisk="/dev/sda"
      fi
      if [[ -z "$efipart" ]]; then
-        rootdisk=$(findmnt -n -o SOURCE / | sed 's/[0-9]\+$//')
+        rootdisk=$(findmnt -n -o SOURCE / | sed 's/[0-9]\+$//;s/p\+$//')
         if [[ "$rootdisk" != "$windisk" && "$rootdisk" != "/dev/sda" ]]; then
            efipart=$(sudo sfdisk -o device,type -l "$rootdisk" | grep "EFI" | awk '{print $1}')
            efidisk="$rootdisk"
@@ -204,7 +204,7 @@ if   [[ "$firmware" == "uefi" ]]; then
         exit 1
      fi
      efifstype=$(lsblk -o path,fstype | grep "$efipart" | awk '{print $2}')
-     syspath=$(lsblk -o path,mountpoint | grep "$efipart" | awk '{print $2}')
+     syspath=$(lsblk -o path,mountpoint | grep "$efipart" | awk -v n=2 '{ for (i=n; i<=NF; i++) printf "%s%s", $i, (i<NF ? OFS : ORS)}')
      if [[ -z "${syspath// }" ]]; then
         rmsysmnt="true"
         syspath="/mnt/EFI"
@@ -236,7 +236,7 @@ elif [[ "$firmware" == "bios" || "$firmware" == "both" ]]; then
         fi
      fi
      if [[ -z "$syspart" ]]; then
-        rootdisk=$(findmnt -n -o SOURCE / | sed 's/[0-9]\+$//')
+        rootdisk=$(findmnt -n -o SOURCE / | sed 's/[0-9]\+$//;s/p\+$//')
         if [[ "$rootdisk" != "$windisk" && "$rootdisk" != "/dev/sda" ]]; then
            syspart=$(sudo sfdisk -o device,boot -l "$rootdisk" 2>/dev/null | grep -E '/dev/.*\*' | awk '{print $1}')
            errormsg=$(sudo sfdisk -o device,boot -l "$rootdisk" 2>&1>/dev/null)
@@ -251,12 +251,8 @@ elif [[ "$firmware" == "bios" || "$firmware" == "both" ]]; then
         if [[ "$virtual" == "true" ]]; then umount_vpart; fi
         exit 1
      fi
-     if [[ "$firmware" == "both" ]]; then
-        efipart="$syspart"
-        efidisk=$(printf "$syspart" | sed 's/[0-9]\+$//')
-     fi
      sysfstype=$(lsblk -o path,fstype | grep "$syspart" | awk '{print $2}')
-     syspath=$(lsblk -o path,mountpoint | grep "$syspart" | awk '{print $2}')
+     syspath=$(lsblk -o path,mountpoint | grep "$syspart" | awk -v n=2 '{ for (i=n; i<=NF; i++) printf "%s%s", $i, (i<NF ? OFS : ORS)}')
      if [[ -z "${syspath// }" ]]; then
         rmsysmnt="true"
         syspath="/mnt/winsys"
@@ -271,6 +267,7 @@ elif [[ "$firmware" == "bios" || "$firmware" == "both" ]]; then
      if [[ "$firmware" == "both" ]]; then
         efipart="$syspart"
         efifstype="$sysfstype"
+        efidisk=$(printf "$efipart" | sed 's/[0-9]\+$//;s/p\+$//')
      fi
 fi
 }
@@ -290,7 +287,7 @@ if   [[ "$firmware" == "uefi" ]]; then
      efifstype=$(lsblk -o path,fstype | grep "$efipart" | awk '{print $2}')
 elif [[ "$firmware" == "bios" || "$firmware" == "both" ]]; then
      syspart=$(lsblk -o path,mountpoint | grep "$syspath" | awk '{print $1}')
-     sysdisk=$(printf "$syspart" | sed 's/[0-9]\+$//')
+     sysdisk=$(printf "$syspart" | sed 's/[0-9]\+$//;s/p\+$//')
      if [[ "$virtual" == "false" || "$verbose" == "true" ]]; then
         echo "Checking block device for active partition (sudo required)..."
      fi
@@ -495,11 +492,11 @@ fi
 # Check source for path to the WBM files then get the block device.
 # Get the mount point, file path and block device that contains the virtual disk file.
 if   [[ -d "$winpath/Windows/Boot" ]]; then
-     windisk=$(lsblk -o path,mountpoint | grep "$winpath" | awk '{print $1}' | sed 's/[0-9]\+$//')
+     windisk=$(lsblk -o path,mountpoint | grep "$winpath" | awk '{print $1}' | sed 's/[0-9]\+$//;s/p\+$//')
 elif [[ "$virtual" == "true" && -d "$vrtpath/Windows/Boot" ]]; then
      if [[ "$winpath" == *"/mnt"* ]]; then winpath=$(echo "$winpath" | cut -d/ -f1-3); fi
      if [[ "$winpath" == *"/media"* ]]; then winpath=$(echo "$winpath" | cut -d/ -f1-4); fi
-     windisk=$(lsblk -o path,mountpoint | grep "$winpath" | awk '{print $1}' | sed 's/[0-9]\+$//')
+     windisk=$(lsblk -o path,mountpoint | grep "$winpath" | awk '{print $1}' | sed 's/[0-9]\+$//;s/p\+$//')
      if [[ "$imgpath" == *"/mnt"* ]]; then imgstring=$(echo "$imgpath" | cut -d/ -f4- | sed 's/^/\\/;s/\//\\/g'); fi
      if [[ "$imgpath" == *"/media"* ]]; then imgstring=$(echo "$imgpath" | cut -d/ -f5- | sed 's/^/\\/;s/\//\\/g'); fi
 else
