@@ -9,37 +9,45 @@ Create a Windows VHDX Boot Entry on Linux or macOS
    a. Linux: attach-vhdx windows.vhdx
    b. macOS: attach-vhdx -m windows.vhdx
    
-3. Partition and format virtual disk as a single NTFS volume.
+3. Partition and format virtual disk as MBR with a single NTFS volume.
 
-   Linux: (specify fdisk geometry)
+   Linux:
    a. sudo fdisk /dev/nbd#
-   b. sudo fdisk -l -u=cylinders /dev/nbd#
+   b. sudo fdisk -l -u=cylinders /dev/nbd# (use fdisk geometry for mkntfs)
    c. sudo mkntfs -Q -L "Windows VHD" -p <start_sector> -H <fdisk_heads> -S <fdisk_sectors/track> /dev/nbd#p#
 
-   macOS: (NTFS format/write support required)
-   a. diskutil eraseDisk <NTFS_VENDOR> Windows\ VHD <GPT/MBR> disk#
-   b. Apply a Windows Disk Signature if using MBR scheme.
+   macOS:
+   (Tuxera or Paragon)
+   a. diskutil eraseDisk <NTFS_VENDOR> "Windows VHD" MBR disk#
+   (NTFS-3G)
+   b. diskutil eraseDisk ExFAT "Windows VHD" MBR disk#
+   c. sudo mkntfs -Q -L "Windows VHD" -p <start_sector> -H 255 -S 63 /dev/disk#s#
+
+4. Create a Windows Disk Signature for the virtual disk under macOS using one option below.
+   a. sudo dd if=/dev/random of=/dev/disk# bs=1 count=4 seek=440
+   b. sudo signmbr /dev/disk#
    
-4. Mount the Windows install DVD and examine the index list.
+5. Mount the Windows install DVD and examine the index list.
    a. Linux: wiminfo /media/$USER/<Win_DVD_Label>/sources/install.wim
    b. macOS: wiminfo /Volumes/<Win_DVD_Label>/sources/install.wim
    
-5. Apply a Windows install image to the block device.
+6. Apply a Windows install image to the block device.
    a. Linux: sudo wimapply /media/$USER/<Win_DVD_Label>/sources/install.wim <index> <device>
    b. macOS: sudo wimapply /Volumes/<Win_DVD_Label>/sources/install.wim <index> <device>
    
-6. Mount the virtual disk, view its contents to confirm success, then unmount it.
+7. Mount the virtual disk, view its contents to confirm success, then unmount it.
 
-7. Detach the virtual disk from the nbd or block device.
+8. Detach the virtual disk from the nbd or block device.
    a. Linux: detach-vhdx /dev/nbd#
    b. macOS: hdiutil eject disk#
    
-8. Create or update the Windows boot files.
+9. Create or update the Windows boot files.
    a. bcd-sys windows.vhdx
    
 NOTES:
 
-i.   The steps above are to be performed on a physical disk with an NTFS volume for the VHDX files. A system partition on the same disk is recommended.
+i.   The steps above are to be performed on a physical NTFS volume located on a disk partitioned as GPT or MBR scheme depending on the firmware mode(s).
 ii.  When creating a VHDX file on an NTFS volume supporting sparse files step 1b can be used as a workaround to prevent Windows errors caused by file holes.
-iii. Partitioning and formatting of physical media and virtual disks is recommended to be performed under Linux or macOS. (Tuxera or Paragon NTFS drivers)
+iii. Partitioning and formatting of physical media and virtual disks is recommended to be performed under Linux or macOS. (Tuxera, Paragon or NTFS-3G drivers)
 iv.  Only a fixed size VHDX image is supported under macOS since we can only attach the payload as a raw disk image. Both types are supported under Linux.
+v.   When needed in the final step specify the firmware mode(s) for Windows or the system partition for the boot files on the physical disk.
