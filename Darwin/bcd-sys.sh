@@ -902,8 +902,13 @@ if   [[ -d "$winpath/Windows/Boot" ]]; then
         exit 1
      fi
 elif [[ "$virtual" == "true" && -d "$vrtpath/Windows/Boot" ]]; then
-     winpath=$(echo "$winpath" | cut -d/ -f1-3)
-     imgstring=$(echo "$imgpath" | cut -d/ -f4- | sed 's/^/\\/;s/\//\\/g')
+     if   [[ "$winpath" == "/Users/$USER/.mounty"* ]]; then
+          winpath=$(echo "$winpath" | cut -d/ -f1-5)
+          imgstring=$(echo "$imgpath" | cut -d/ -f6- | sed 's/^/\\/;s/\//\\/g')
+     else
+          winpath=$(echo "$winpath" | cut -d/ -f1-3)
+          imgstring=$(echo "$imgpath" | cut -d/ -f4- | sed 's/^/\\/;s/\//\\/g')
+     fi
      mounted=$(diskutil info "$(basename "$winpath")" | grep "Mounted:" | awk '{print $2}')
      if   [[ "$mounted" == "Yes" ]]; then
           windisk=$(diskutil info "$(basename "$winpath")" | grep "Device Node:" | awk '{print $3}' | sed 's/s[0-9]*$//')
