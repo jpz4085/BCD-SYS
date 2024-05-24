@@ -103,19 +103,40 @@ $resdir/winload.sh "$1" "$2" "$3" "$4" "$5" "$6" "$7" "$8" "$9" "${10}" "${11}" 
 cp $resdir/Templates/BCD-NEW $tmpdir/BCD-Windows
 hivexregedit --merge --prefix BCD00000001 $tmpdir/BCD-Windows $resdir/Templates/winload.reg
 hivexsh -w $tmpdir/BCD-Windows -f $tmpdir/winload.txt
+if [[ ! $? -eq 0 ]]; then
+   echo -e "${RED}Failed to create main BCD store.${NC}"
+   return 1
+fi
 if   [[ "$3" == "uefi" ]]; then
      if [[ "$verbose" == "true" ]]; then echo "Build the recovery BCD store..."; fi
      $resdir/recovery.sh "$2" "$5" "$8" > $tmpdir/recovery.txt
      cp $resdir/Templates/BCD-NEW $tmpdir/BCD-Recovery
      hivexregedit --merge --prefix BCD00000001 $tmpdir/BCD-Recovery $resdir/Templates/recovery.reg
      hivexsh -w $tmpdir/BCD-Recovery -f $tmpdir/recovery.txt
+     if [[ ! $? -eq 0 ]]; then
+        echo -e "${RED}Failed to create recovery BCD store.${NC}"
+        return 1
+     fi
      if [[ "$verbose" == "true" ]]; then echo "Copy the BCD hives to the ESP folders..."; fi
      sudo cp $tmpdir/BCD-Windows "$2"/EFI/Microsoft/Boot/BCD
+     if [[ ! $? -eq 0 ]]; then
+        echo -e "${RED}Failed to copy main hive to the ESP.${NC}"
+        return 1
+     fi
      sudo cp $tmpdir/BCD-Recovery "$2"/EFI/Microsoft/Recovery/BCD
+     if [[ ! $? -eq 0 ]]; then
+        echo -e "${RED}Failed to copy recovery hive to the ESP.${NC}"
+        return 1
+     fi
 elif [[ "$3" == "bios" ]]; then
      if [[ "$verbose" == "true" ]]; then echo "Copy the main BCD hive to the boot folder..."; fi
      sudo cp $tmpdir/BCD-Windows "$2"/Boot/BCD
+     if [[ ! $? -eq 0 ]]; then
+        echo -e "${RED}Failed to copy main hive to the system partition.${NC}"
+        return 1
+     fi
 fi
+return 0
 }
 
 # Build new Windows entry and update existing BCD stores.
@@ -125,12 +146,25 @@ if [[ "$verbose" == "true" ]]; then echo "Update main BCD hive with new entries.
 $resdir/winload.sh "$1" "$2" "$3" "$4" "$5" "$6" "$7" "$8" "$9" "${10}" "${11}" "${12}" > $tmpdir/winload.txt
 if   [[ "$3" == "uefi" ]]; then
      sudo hivexsh -w "$2/EFI/Microsoft/Boot/BCD" -f $tmpdir/winload.txt
+     if [[ ! $? -eq 0 ]]; then
+        echo -e "${RED}Failed to update main BCD store.${NC}"
+        return 1
+     fi
      if [[ "$verbose" == "true" ]]; then echo "Update recovery BCD hive with new entries..."; fi
      $resdir/recovery.sh "$2" "$5" "$8" > $tmpdir/recovery.txt
      sudo hivexsh -w "$2/EFI/Microsoft/Recovery/BCD" -f $tmpdir/recovery.txt
+     if [[ ! $? -eq 0 ]]; then
+        echo -e "${RED}Failed to update recovery BCD store.${NC}"
+        return 1
+     fi
 elif [[ "$3" == "bios" ]]; then
      sudo hivexsh -w "$2/Boot/BCD" -f $tmpdir/winload.txt
+     if [[ ! $? -eq 0 ]]; then
+        echo -e "${RED}Failed to update main BCD store.${NC}"
+        return 1
+     fi
 fi
+return 0
 }
 
 # Copy the WBM files for the specified firmware and set the file attributes the same as bcdboot.
@@ -516,6 +550,10 @@ if  [[ "$firmware" != "uefi" && "$firmware" != "bios" && "$firmware" != "both" ]
     if  [[ "$virtual" == "true" ]]; then umount_vpart; fi
     exit 1
 else
+    if [[ -f $tmpdir/winload.txt || -f $tmpdir/recovery.txt || -f $tmpdir/wbmfwvar.txt || \
+          -f $tmpdir/BCD-Windows || -f $tmpdir/BCD-Recovery ]]; then
+       cleanup
+    fi
     if [[ "$firmware" == "uefi" || "$firmware" == "both" ]]; then
        if  [[ -z "$syspath" ]]; then
            get_syspath "$firmware" "$windisk"
@@ -575,6 +613,11 @@ else
             fi
             build_stores "$winpath" "$syspath" "$fwmode" "$setfwmod" "$createbcd" "$prewbmdef" \
                          "$prodname" "$locale" "$verbose" "$virtual" "$vrtpath" "$imgstring"
+            if [[ ! $? -eq 0 ]]; then
+               if [[ "$virtual" == "true" ]]; then umount_vpart; fi
+               if [[ "$rmsysmnt" == "true" ]]; then umount_system; fi
+               exit 1
+            fi
             if [[ "$setfwmod" == "false" && "$efibootvars" == "true" ]]; then
                if [[ ! -z "$wbmoptnum" ]]; then
                   if [[ "$verbose" == "true" ]]; then echo "Remove the current Windows Boot Manager option..."; fi
@@ -607,6 +650,11 @@ else
             fi
             build_stores "$winpath" "$syspath" "$fwmode" "$setfwmod" "$createbcd" "$prewbmdef" \
                          "$prodname" "$locale" "$verbose" "$virtual" "$vrtpath" "$imgstring"
+            if [[ ! $? -eq 0 ]]; then
+               if [[ "$virtual" == "true" ]]; then umount_vpart; fi
+               if [[ "$rmsysmnt" == "true" ]]; then umount_system; fi
+               exit 1
+            fi
             if [[ "$setfwmod" == "false" && "$efibootvars" == "true" ]]; then
                if [[ -z "$wbmoptnum" ]]; then
                   if [[ "$verbose" == "true" ]]; then echo "Add the Windows Boot Manager to the firmware..."; fi
@@ -640,6 +688,11 @@ else
             fi
             update_winload "$winpath" "$syspath" "$fwmode" "$setfwmod" "$createbcd" "$prewbmdef" \
                            "$prodname" "$locale" "$verbose" "$virtual" "$vrtpath" "$imgstring"
+            if [[ ! $? -eq 0 ]]; then
+               if [[ "$virtual" == "true" ]]; then umount_vpart; fi
+               if [[ "$rmsysmnt" == "true" ]]; then umount_system; fi
+               exit 1
+            fi
             if [[ "$setfwmod" == "false" && "$efibootvars" == "true" && -z "$wbmoptnum" ]]; then
                if [[ "$verbose" == "true" ]]; then echo "Add the Windows Boot Manager to the firmware..."; fi
                sudo efibootmgr -c -d "$efidisk" -p "$efinum" -l "$wbmefipath" -L "Windows Boot Manager" \
@@ -732,6 +785,11 @@ else
           fi
           build_stores "$winpath" "$syspath" "$fwmode" "$setfwmod" "$createbcd" "$prewbmdef" \
                        "$prodname" "$locale" "$verbose" "$virtual" "$vrtpath" "$imgstring"
+          if [[ ! $? -eq 0 ]]; then
+             if [[ "$virtual" == "true" ]]; then umount_vpart; fi
+             if [[ "$rmsysmnt" == "true" ]]; then umount_system; fi
+             exit 1
+          fi
        elif [[ "$sysbtmgr" == "true" && "$clean" == "true" ]]; then
             if [[ "$verbose" == "true" ]]; then echo "Remove current BCD store..."; fi
             sudo rm -f "$syspath"/Boot/BCD
@@ -761,6 +819,11 @@ else
             fi
             build_stores "$winpath" "$syspath" "$fwmode" "$setfwmod" "$createbcd" "$prewbmdef" \
                          "$prodname" "$locale" "$verbose" "$virtual" "$vrtpath" "$imgstring"
+            if [[ ! $? -eq 0 ]]; then
+               if [[ "$virtual" == "true" ]]; then umount_vpart; fi
+               if [[ "$rmsysmnt" == "true" ]]; then umount_system; fi
+               exit 1
+            fi
        else
             createbcd="false"
             if   [[ "$sysuwfver" != "NULL" && "$sysvhdver" != "NULL" && "$localuwfver" != "NULL" && "$localvhdver" != "NULL" ]]; then
@@ -797,10 +860,16 @@ else
             fi
             update_winload "$winpath" "$syspath" "$fwmode" "$setfwmod" "$createbcd" "$prewbmdef" \
                            "$prodname" "$locale" "$verbose" "$virtual" "$vrtpath" "$imgstring"
+            if [[ ! $? -eq 0 ]]; then
+               if [[ "$virtual" == "true" ]]; then umount_vpart; fi
+               if [[ "$rmsysmnt" == "true" ]]; then umount_system; fi
+               exit 1
+            fi
        fi
        if [[ "$rmsysmnt" == "true" ]]; then umount_system; fi
        if [[ "$virtual" == "true" ]]; then umount_vpart; fi
        cleanup
        echo "Finished configuring BIOS boot files."
     fi
+exit 0
 fi
