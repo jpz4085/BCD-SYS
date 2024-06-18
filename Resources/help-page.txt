@@ -40,3 +40,12 @@ the default path at /EFI/BOOT/BOOTX64.efi
 
 Read "Windows VHDX Native Boot.txt" under the Resources folder for
 instructions on setting up a Windows installation on a virtual disk.
+
+Troubleshooting:
+
+If errors occur during the BCD creation and updating process where
+the stores can't be built or copied to the destination successfully
+the temporary hivexsh scripts and BCD files will remain in the 'tmp'
+folder when the tool is installed to the system. Otherwise they can
+be found in the subfolder for your platform when running from the
+cloned repository. These may help with resolving the issue.
