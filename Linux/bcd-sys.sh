@@ -237,8 +237,8 @@ if   [[ "$firmware" == "uefi" ]]; then
         if [[ "$virtual" == "true" ]]; then umount_vpart; fi
         exit 1
      fi
-     efifstype=$(lsblk -o path,fstype | grep "$efipart" | awk '{print $2}')
-     syspath=$(lsblk -o path,mountpoint | grep "$efipart" | awk -v n=2 '{ for (i=n; i<=NF; i++) printf "%s%s", $i, (i<NF ? OFS : ORS)}')
+     efifstype=$(lsblk -o path,fstype | grep "$efipart" | awk '{print $2}' | uniq)
+     syspath=$(lsblk -o path,mountpoint | grep "$efipart" | awk -v n=2 '{ for (i=n; i<=NF; i++) printf "%s%s", $i, (i<NF ? OFS : ORS)}' | uniq)
      if [[ -z "${syspath// }" ]]; then
         rmsysmnt="true"
         syspath="/mnt/EFI"
@@ -285,8 +285,8 @@ elif [[ "$firmware" == "bios" || "$firmware" == "both" ]]; then
         if [[ "$virtual" == "true" ]]; then umount_vpart; fi
         exit 1
      fi
-     sysfstype=$(lsblk -o path,fstype | grep "$syspart" | awk '{print $2}')
-     syspath=$(lsblk -o path,mountpoint | grep "$syspart" | awk -v n=2 '{ for (i=n; i<=NF; i++) printf "%s%s", $i, (i<NF ? OFS : ORS)}')
+     sysfstype=$(lsblk -o path,fstype | grep "$syspart" | awk '{print $2}' | uniq)
+     syspath=$(lsblk -o path,mountpoint | grep "$syspart" | awk -v n=2 '{ for (i=n; i<=NF; i++) printf "%s%s", $i, (i<NF ? OFS : ORS)}' | uniq)
      if [[ -z "${syspath// }" ]]; then
         rmsysmnt="true"
         syspath="/mnt/winsys"
@@ -317,10 +317,10 @@ if   [[ "$firmware" == "uefi" ]]; then
      if [[ "$virtual" == "false" || "$verbose" == "true" ]]; then
         echo "Get block device for mount point (sudo required later)..."
      fi
-     efipart=$(lsblk -o path,mountpoint | grep "$syspath" | awk '{print $1}')
-     efifstype=$(lsblk -o path,fstype | grep "$efipart" | awk '{print $2}')
+     efipart=$(lsblk -o path,mountpoint | grep "$syspath" | awk '{print $1}' | uniq)
+     efifstype=$(lsblk -o path,fstype | grep "$efipart" | awk '{print $2}' | uniq)
 elif [[ "$firmware" == "bios" || "$firmware" == "both" ]]; then
-     syspart=$(lsblk -o path,mountpoint | grep "$syspath" | awk '{print $1}')
+     syspart=$(lsblk -o path,mountpoint | grep "$syspath" | awk '{print $1}' | uniq)
      sysdisk=$(printf "$syspart" | sed 's/[0-9]\+$//;s/p\+$//')
      if [[ "$virtual" == "false" || "$verbose" == "true" ]]; then
         echo "Checking block device for active partition (sudo required)..."
@@ -349,7 +349,7 @@ elif [[ "$firmware" == "bios" || "$firmware" == "both" ]]; then
           if [[ "$virtual" == "true" ]]; then umount_vpart; fi
           exit 1
      fi
-     sysfstype=$(lsblk -o path,fstype | grep "$syspart" | awk '{print $2}')
+     sysfstype=$(lsblk -o path,fstype | grep "$syspart" | awk '{print $2}' | uniq)
      if [[ "$firmware" == "both" ]]; then
         efipart="$syspart"
         efifstype="$sysfstype"
@@ -383,7 +383,7 @@ mount_vpart () {
 vrtpath="/mnt/virtwin"
 echo "Partition table on: $imgpath"
 echo
-lsblk "$vrtdisk" -o path,pttype,fstype,parttypename,label,mountpoint | sed '2d'
+lsblk "$vrtdisk" -o path,pttype,fstype,parttypename,label,mountpoint | sed '2d' | uniq
 echo
 read -p "Enter device containing the Windows volume [nbd#p#]:" vtwinpart
 while [[ "$vtwinpart" != *"nbd"* || ! -e "/dev/$vtwinpart" ]]; do
@@ -526,11 +526,11 @@ fi
 # Check source for path to the WBM files then get the block device.
 # Get the mount point, file path and block device that contains the virtual disk file.
 if   [[ -d "$winpath/Windows/Boot" ]]; then
-     windisk=$(lsblk -o path,mountpoint | grep "$winpath" | awk '{print $1}' | sed 's/[0-9]\+$//;s/p\+$//')
+     windisk=$(lsblk -o path,mountpoint | grep "$winpath" | awk '{print $1}' | sed 's/[0-9]\+$//;s/p\+$//' | uniq)
 elif [[ "$virtual" == "true" && -d "$vrtpath/Windows/Boot" ]]; then
      if [[ "$winpath" == *"/mnt"* ]]; then winpath=$(echo "$winpath" | cut -d/ -f1-3); fi
      if [[ "$winpath" == *"/media"* ]]; then winpath=$(echo "$winpath" | cut -d/ -f1-4); fi
-     windisk=$(lsblk -o path,mountpoint | grep "$winpath" | awk '{print $1}' | sed 's/[0-9]\+$//;s/p\+$//')
+     windisk=$(lsblk -o path,mountpoint | grep "$winpath" | awk '{print $1}' | sed 's/[0-9]\+$//;s/p\+$//' | uniq)
      if [[ "$imgpath" == *"/mnt"* ]]; then imgstring=$(echo "$imgpath" | cut -d/ -f4- | sed 's/^/\\/;s/\//\\/g'); fi
      if [[ "$imgpath" == *"/media"* ]]; then imgstring=$(echo "$imgpath" | cut -d/ -f5- | sed 's/^/\\/;s/\//\\/g'); fi
 else
