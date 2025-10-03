@@ -84,6 +84,9 @@ if  [[ "$virtual" == "true" ]]; then
          vtdiskbytes=$(printf "%s" $(endian $(printf "%032x" "$vtdisksig")) | sed 's/.\{2\}/&,/g;s/,$//')
          vtpartbytes=$(printf "%s" $(endian $(printf "%032x" "$vtpartoffset")) | sed 's/.\{2\}/&,/g;s/,$//')
          vtschemebyte="01"
+    else
+        echo "Partition scheme of $virtdisk is $vtscheme." 1>&2
+        echo -e "${RED}Partition scheme must be GPT or DOS format. BCD will be invalid.${NC}" 1>&2
     fi
     if   [[ "$pyscheme" == "gpt" ]]; then
          pydiskguid=$(sudo sfdisk -l $physdisk | grep "Disk identifier:" | awk '{print $3}')
@@ -99,6 +102,9 @@ if  [[ "$virtual" == "true" ]]; then
          pydiskbytes=$(printf "%s" $(endian $(printf "%032x" "$pydisksig")) | sed 's/.\{2\}/&,/g;s/,$//')
          pypartbytes=$(printf "%s" $(endian $(printf "%032x" "$pypartoffset")) | sed 's/.\{2\}/&,/g;s/,$//')
          pyschemebyte="01"
+    else
+        echo "Partition scheme of $physdisk is $pyscheme." 1>&2
+        echo -e "${RED}Partition scheme must be GPT or DOS format. BCD will be invalid.${NC}" 1>&2
     fi
     imgstrbytes=$(printf '%s' "$imgstring" | hexdump -ve '/1 "%02x\0\0"' | sed 's/.\{2\}/&,/g;s/,$//')
     imgstrlen=$((${#imgstring} * 2 + 2))
@@ -123,6 +129,9 @@ else
          diskbytes=$(printf "%s" $(endian $(printf "%032x" "$disksig")) | sed 's/.\{2\}/&,/g;s/,$//')
          partbytes=$(printf "%s" $(endian $(printf "%032x" "$partoffset")) | sed 's/.\{2\}/&,/g;s/,$//')
          schemebyte="01"
+    else
+        echo "Partition scheme of $disk is $scheme." 1>&2
+        echo -e "${RED}Partition scheme must be GPT or DOS format. BCD will be invalid.${NC}" 1>&2
     fi
     printf "hex:3:00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,06,00,00,00,00,00,00,00,48,00,00,00,00,00,00,00,$partbytes,00,00,00,00,$schemebyte,00,00,00,$diskbytes,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00\n"
 fi
