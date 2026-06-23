@@ -231,11 +231,19 @@ if   [[ "$firmware" == "uefi" ]]; then
            efidisk="$rootdisk"
         fi
      fi
-     if [[ -z "$efipart" ]]; then
-        echo -e "${RED}Unable to locate an EFI System Partition.${NC}"
-        echo "Use the --syspath option to specify a volume."
-        if [[ "$virtual" == "true" ]]; then umount_vpart; fi
-        exit 1
+     if   [[ -z "$efipart" ]]; then
+          echo -e "${RED}Unable to locate an EFI System Partition.${NC}"
+          echo "Use the --syspath option to specify a volume."
+          if [[ "$virtual" == "true" ]]; then umount_vpart; fi
+          exit 1
+     else
+          efischeme=$(sudo sfdisk -l $efidisk | grep "Disklabel type:" | awk '{print $3}')
+          if [[ "$efischeme" != "gpt" && "$efischeme" != "dos" ]]; then
+             echo "${BGTYELLOW}ESP disk $efidisk is using $efischeme partition scheme.${NC}"
+             echo -e "${RED}Partition scheme must be GPT or DOS type.${NC}"
+             if [[ "$virtual" == "true" ]]; then umount_vpart; fi
+             exit 1
+          fi
      fi
      efifstype=$(lsblk -o path,fstype | grep "$efipart" | awk '{print $2}' | uniq)
      syspath=$(lsblk -o path,mountpoint | grep "$efipart" | awk -v n=2 '{ for (i=n; i<=NF; i++) printf "%s%s", $i, (i<NF ? OFS : ORS)}' | uniq)
@@ -254,6 +262,7 @@ elif [[ "$firmware" == "bios" || "$firmware" == "both" ]]; then
      if [[ "$virtual" == "false" || "$verbose" == "true" ]]; then
         echo "Checking block devices for active partition (sudo required)..."
      fi
+     sysdisk="$windisk"
      syspart=$(sudo sfdisk -o device,boot -l "$windisk" 2>/dev/null | grep -E '/dev/.*\*' | awk '{print $1}')
      errormsg=$(sudo sfdisk -o device,boot -l "$windisk" 2>&1>/dev/null)
      if [[ "$errormsg" == "sfdisk: gpt unknown column: boot" ]]; then
@@ -263,6 +272,7 @@ elif [[ "$firmware" == "bios" || "$firmware" == "both" ]]; then
         exit 1
      fi
      if [[ -z "$syspart" ]]; then
+        sysdisk="/dev/sda"
         syspart=$(sudo sfdisk -o device,boot -l /dev/sda 2>/dev/null | grep -E '/dev/.*\*' | awk '{print $1}')
         errormsg=$(sudo sfdisk -o device,boot -l /dev/sda 2>&1>/dev/null)
         if [[ "$errormsg" == "sfdisk: gpt unknown column: boot" ]]; then
@@ -272,6 +282,7 @@ elif [[ "$firmware" == "bios" || "$firmware" == "both" ]]; then
      if [[ -z "$syspart" ]]; then
         rootdisk=$(findmnt -n -o SOURCE / | sed 's/[0-9]\+$//;s/p\+$//')
         if [[ "$rootdisk" != "$windisk" && "$rootdisk" != "/dev/sda" ]]; then
+           sysdisk="$rootdisk"
            syspart=$(sudo sfdisk -o device,boot -l "$rootdisk" 2>/dev/null | grep -E '/dev/.*\*' | awk '{print $1}')
            errormsg=$(sudo sfdisk -o device,boot -l "$rootdisk" 2>&1>/dev/null)
            if [[ "$errormsg" == "sfdisk: gpt unknown column: boot" ]]; then
@@ -279,11 +290,19 @@ elif [[ "$firmware" == "bios" || "$firmware" == "both" ]]; then
            fi
         fi
      fi
-     if [[ -z "$syspart" ]]; then
-        echo -e "${RED}Unable to locate an active partition.${NC}"
-        echo "Use the --syspath option to specify a volume."
-        if [[ "$virtual" == "true" ]]; then umount_vpart; fi
-        exit 1
+     if   [[ -z "$syspart" ]]; then
+          echo -e "${RED}Unable to locate an active partition.${NC}"
+          echo "Use the --syspath option to specify a volume."
+          if [[ "$virtual" == "true" ]]; then umount_vpart; fi
+          exit 1
+     else
+          syscheme=$(sudo sfdisk -l $sysdisk | grep "Disklabel type:" | awk '{print $3}')
+          if [[ "$syscheme" != "dos" ]]; then
+             echo "${BGTYELLOW}System disk $sysdisk is using $syscheme partition scheme.${NC}"
+             echo -e "${RED}Partition scheme must be DOS type.${NC}"
+             if [[ "$virtual" == "true" ]]; then umount_vpart; fi
+             exit 1
+          fi
      fi
      sysfstype=$(lsblk -o path,fstype | grep "$syspart" | awk '{print $2}' | uniq)
      syspath=$(lsblk -o path,mountpoint | grep "$syspart" | awk -v n=2 '{ for (i=n; i<=NF; i++) printf "%s%s", $i, (i<NF ? OFS : ORS)}' | uniq)
@@ -318,7 +337,15 @@ if   [[ "$firmware" == "uefi" ]]; then
         echo "Get block device for mount point (sudo required later)..."
      fi
      efipart=$(lsblk -o path,mountpoint | grep "$syspath" | awk '{print $1}' | uniq)
+     efidisk=$(printf "$efipart" | sed 's/[0-9]\+$//;s/p\+$//')
      efifstype=$(lsblk -o path,fstype | grep "$efipart" | awk '{print $2}' | uniq)
+     efischeme=$(sudo sfdisk -l $efidisk | grep "Disklabel type:" | awk '{print $3}')
+     if [[ "$efischeme" != "gpt" && "$efischeme" != "dos" ]]; then
+        echo "${BGTYELLOW}ESP disk $efidisk is using $efischeme partition scheme.${NC}"
+        echo -e "${RED}Partition scheme must be GPT or DOS type.${NC}"
+        if [[ "$virtual" == "true" ]]; then umount_vpart; fi
+        exit 1
+     fi
 elif [[ "$firmware" == "bios" || "$firmware" == "both" ]]; then
      syspart=$(lsblk -o path,mountpoint | grep "$syspath" | awk '{print $1}' | uniq)
      sysdisk=$(printf "$syspart" | sed 's/[0-9]\+$//;s/p\+$//')
@@ -348,6 +375,14 @@ elif [[ "$firmware" == "bios" || "$firmware" == "both" ]]; then
           echo -e "${RED}The volume $syspath on $syspart is not the active partition.${NC}"
           if [[ "$virtual" == "true" ]]; then umount_vpart; fi
           exit 1
+     else
+          syscheme=$(sudo sfdisk -l $sysdisk | grep "Disklabel type:" | awk '{print $3}')
+          if [[ "$syscheme" != "dos" ]]; then
+             echo "${BGTYELLOW}System disk $sysdisk is using $syscheme partition scheme.${NC}"
+             echo -e "${RED}Partition scheme must be DOS type.${NC}"
+             if [[ "$virtual" == "true" ]]; then umount_vpart; fi
+             exit 1
+          fi
      fi
      sysfstype=$(lsblk -o path,fstype | grep "$syspart" | awk '{print $2}' | uniq)
      if [[ "$firmware" == "both" ]]; then
@@ -376,6 +411,16 @@ for x in /sys/class/block/nbd*; do
     fi
 done
 sudo qemu-nbd -c "$vrtdisk" "$imgpath"
+vhdscheme=$(sudo sfdisk -l $vrtdisk | grep "Disklabel type:" | awk '{print $3}')
+if [[ "$vhdscheme" != "gpt" && "$vhdscheme" != "dos" ]]; then
+   echo "${BGTYELLOW}Virtual disk is using $vhdscheme partition scheme.${NC}"
+   echo -e "${RED}Partition scheme must be GPT or DOS type.${NC}"
+   sudo qemu-nbd -d "$vrtdisk" > /dev/null
+   if [[ "$unloadnbd" == "true" ]]; then
+      sleep 1 && sudo rmmod nbd
+   fi
+   exit 1
+fi
 }
 
 # Display partitions on virtual disk and mount the specified volume.
