@@ -58,6 +58,8 @@ ordscript="cd Objects\\{9dea862c-5cdd-4e70-acc1-f32b344d4795}\\\Elements\\\24000
 locscript="cd Objects\\{9dea862c-5cdd-4e70-acc1-f32b344d4795}\\\Elements\\\12000005\nlsval Element\nunload\n"
 winproduct=$(printf "$namescript" | hivexsh "$softhivepath" | cut -d' ' -f 1,2)
 
+if [[ "$winproduct" == *"7" || "$winproduct" == *"Vista" ]]; then legacybcd="true"; else legacybcd="false"; fi
+
 if [[ "$verbose" == "true" ]]; then
    echo "Loader GUID: {"$winldrguid"}" 1>&2
    echo "Resume GUID: {"$winresguid"}" 1>&2
@@ -78,8 +80,8 @@ elif [[ "$firmware" == "bios" ]]; then
 fi
 
 if [[ "$createbcd" == "false" ]]; then
-   wbmdsporder=$(printf "$ordscript" | sudo hivexsh "$mainbcdpath" | sed 's/.*://;s/,//g')
-   wbmlocale=$(printf "$locscript" | sudo hivexsh "$mainbcdpath")
+   wbmdsporder=$(printf "$ordscript" | hivexsh "$mainbcdpath" | sed 's/.*://;s/,//g')
+   wbmlocale=$(printf "$locscript" | hivexsh "$mainbcdpath")
 fi
 
 ### Windows Resume Loader Entry ###
@@ -127,29 +129,31 @@ printf "cd 14000006\n"
 printf "setval 1\n"
 printf "Element\n"
 printf "hex:7:7b,00,31,00,61,00,66,00,61,00,39,00,63,00,34,00,39,00,2d,00,31,00,36,00,61,00,62,00,2d,00,34,00,61,00,35,00,63,00,2d,00,39,00,30,00,31,00,62,00,2d,00,32,00,31,00,32,00,38,00,30,00,32,00,64,00,61,00,39,00,34,00,36,00,30,00,7d,00,00,00,00,00\n"
-printf "cd ..\n"
-if [[ "$firmware" == "uefi" ]]; then
-   printf "add 16000060\n"
-   printf "cd 16000060\n"
+if [[ "$legacybcd" == "false" ]]; then
+   printf "cd ..\n"
+   if [[ "$firmware" == "uefi" ]]; then
+      printf "add 16000060\n"
+      printf "cd 16000060\n"
+      printf "setval 1\n"
+      printf "Element\n"
+      printf "hex:3:01\n"
+      printf "cd ..\n"
+   fi
+   printf "add 17000077\n"
+   printf "cd 17000077\n"
    printf "setval 1\n"
    printf "Element\n"
-   printf "hex:3:01\n"
+   printf "hex:3:75,00,00,15,00,00,00,00\n"
    printf "cd ..\n"
-fi
-printf "add 17000077\n"
-printf "cd 17000077\n"
-printf "setval 1\n"
-printf "Element\n"
-printf "hex:3:75,00,00,15,00,00,00,00\n"
-printf "cd ..\n"
-printf "add 21000001\n"
-printf "cd 21000001\n"
-printf "setval 1\n"
-printf "Element\n"
-if  [[ "$virtual" == "true" ]]; then
-    $resdir/update_device.sh "$sourcepath" "$winvhdpath" "$imgstring"
-else
-    $resdir/update_device.sh "$sourcepath"
+   printf "add 21000001\n"
+   printf "cd 21000001\n"
+   printf "setval 1\n"
+   printf "Element\n"
+   if  [[ "$virtual" == "true" ]]; then
+       $resdir/update_device.sh "$sourcepath" "$winvhdpath" "$imgstring"
+   else
+       $resdir/update_device.sh "$sourcepath"
+   fi
 fi
 printf "cd ..\n"
 printf "add 22000002\n"
@@ -157,12 +161,14 @@ printf "cd 22000002\n"
 printf "setval 1\n"
 printf "Element\n"
 printf "string:\hiberfil.sys\n"
-printf "cd ..\n"
-printf "add 25000008\n"
-printf "cd 25000008\n"
-printf "setval 1\n"
-printf "Element\n"
-printf "hex:3:01,00,00,00,00,00,00,00\n"
+if [[ "$legacybcd" == "false" ]]; then
+   printf "cd ..\n"
+   printf "add 25000008\n"
+   printf "cd 25000008\n"
+   printf "setval 1\n"
+   printf "Element\n"
+   printf "hex:3:01,00,00,00,00,00,00,00\n"
+fi
 if [[ "$firmware" == "bios" ]]; then
    printf "cd ..\n"
    printf "add 26000006\n"
@@ -221,20 +227,22 @@ printf "cd 14000006\n"
 printf "setval 1\n"
 printf "Element\n"
 printf "hex:7:7b,00,36,00,65,00,66,00,62,00,35,00,32,00,62,00,66,00,2d,00,31,00,37,00,36,00,36,00,2d,00,34,00,31,00,64,00,62,00,2d,00,61,00,36,00,62,00,33,00,2d,00,30,00,65,00,65,00,35,00,65,00,66,00,66,00,37,00,32,00,62,00,64,00,37,00,7d,00,00,00,00,00\n"
-printf "cd ..\n"
-if [[ "$firmware" == "uefi" ]]; then
-   printf "add 16000060\n"
-   printf "cd 16000060\n"
+if [[ "$legacybcd" == "false" ]]; then
+   printf "cd ..\n"
+   if [[ "$firmware" == "uefi" ]]; then
+      printf "add 16000060\n"
+      printf "cd 16000060\n"
+      printf "setval 1\n"
+      printf "Element\n"
+      printf "hex:3:01\n"
+      printf "cd ..\n"
+   fi
+   printf "add 17000077\n"
+   printf "cd 17000077\n"
    printf "setval 1\n"
    printf "Element\n"
-   printf "hex:3:01\n"
-   printf "cd ..\n"
+   printf "hex:3:75,00,00,15,00,00,00,00\n"
 fi
-printf "add 17000077\n"
-printf "cd 17000077\n"
-printf "setval 1\n"
-printf "Element\n"
-printf "hex:3:75,00,00,15,00,00,00,00\n"
 printf "cd ..\n"
 printf "add 21000001\n"
 printf "cd 21000001\n"
@@ -263,12 +271,22 @@ printf "cd 25000020\n"
 printf "setval 1\n"
 printf "Element\n"
 printf "hex:3:00,00,00,00,00,00,00,00\n"
-printf "cd ..\n"
-printf "add 250000c2\n"
-printf "cd 250000c2\n"
-printf "setval 1\n"
-printf "Element\n"
-printf "hex:3:01,00,00,00,00,00,00,00\n"
+if [[ "$legacybcd" == "false" ]]; then
+   printf "cd ..\n"
+   printf "add 250000c2\n"
+   printf "cd 250000c2\n"
+   printf "setval 1\n"
+   printf "Element\n"
+   printf "hex:3:01,00,00,00,00,00,00,00\n"
+fi
+if [[ "$winproduct" == *"Vista" ]]; then
+   printf "cd ..\n"
+   printf "add 26000010\n"
+   printf "cd 26000010\n"
+   printf "setval 1\n"
+   printf "Element\n"
+   printf "hex:3:01\n"
+fi
 
 ### Windows Boot Manager Entry ###
 printf "cd ..\..\..\n"
