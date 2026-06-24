@@ -643,11 +643,13 @@ fi
 if   [[ -d "$winpath/Windows/Boot" ]]; then
      windisk=$(lsblk -o path,mountpoint | grep "$winpath" | awk '{print $1}' | sed 's/[0-9]\+$//;s/p\+$//' | uniq)
 elif [[ "$virtual" == "true" && -d "$vrtpath/Windows/Boot" ]]; then
-     if [[ "$winpath" == *"/mnt"* ]]; then winpath=$(echo "$winpath" | cut -d/ -f1-3); fi
-     if [[ "$winpath" == *"/media"* ]]; then winpath=$(echo "$winpath" | cut -d/ -f1-4); fi
+     if [[ "$winpath" == "/mnt"* ]]; then winpath=$(echo "$winpath" | cut -d/ -f1-3); fi
+     if [[ "$winpath" == "/media"* ]]; then winpath=$(echo "$winpath" | cut -d/ -f1-4); fi
+     if [[ "$winpath" == "/run/media"* ]]; then winpath=$(echo "$winpath" | cut -d/ -f1-5); fi
      windisk=$(lsblk -o path,mountpoint | grep "$winpath" | awk '{print $1}' | sed 's/[0-9]\+$//;s/p\+$//' | uniq)
-     if [[ "$imgpath" == *"/mnt"* ]]; then imgstring=$(echo "$imgpath" | cut -d/ -f4- | sed 's/^/\\/;s/\//\\/g'); fi
-     if [[ "$imgpath" == *"/media"* ]]; then imgstring=$(echo "$imgpath" | cut -d/ -f5- | sed 's/^/\\/;s/\//\\/g'); fi
+     if [[ "$imgpath" == "/mnt"* ]]; then imgstring=$(echo "$imgpath" | cut -d/ -f4- | sed 's/^/\\/;s/\//\\/g'); fi
+     if [[ "$imgpath" == "/media"* ]]; then imgstring=$(echo "$imgpath" | cut -d/ -f5- | sed 's/^/\\/;s/\//\\/g'); fi
+     if [[ "$imgpath" == "/run/media"* ]]; then imgstring=$(echo "$imgpath" | cut -d/ -f6- | sed 's/^/\\/;s/\//\\/g'); fi
 else
     echo -e "${RED}Invalid source path please try again.${NC}"
     if  [[ "$virtual" == "true" ]]; then umount_vpart; fi
@@ -666,9 +668,7 @@ if  [[ "$firmware" != "uefi" && "$firmware" != "bios" && "$firmware" != "both" ]
     exit 1
 else
     if [[ -f $tmpdir/winload.txt || -f $tmpdir/recovery.txt || -f $tmpdir/wbmfwvar.txt || \
-          -f $tmpdir/BCD-Windows || -f $tmpdir/BCD-Recovery ]]; then
-       cleanup
-    fi
+          -f $tmpdir/BCD-Windows || -f $tmpdir/BCD-Recovery ]]; then cleanup; fi
     if [[ "$firmware" == "uefi" || "$firmware" == "both" ]]; then
        if  [[ -z "$syspath" ]]; then
            get_syspath "$firmware" "$windisk"
