@@ -704,8 +704,8 @@ else
           defbootver=$(peres -v "$defbootpath" 2> /dev/null | grep 'Product Version:' | awk '{print $3}')
        fi
        if test -f "$syswbmpath" && test -f "$localwbmpath"; then
-          syswbmver=$(peres -v "$syswbmpath" | grep 'Product Version:' | awk '{print $3}')
-          localwbmver=$(peres -v "$localwbmpath" | grep 'Product Version:' | awk '{print $3}')
+          syswbmver=$(peres -v "$syswbmpath" 2> /dev/null | grep 'Product Version:' | awk '{print $3}')
+          localwbmver=$(peres -v "$localwbmpath" 2> /dev/null | grep 'Product Version:' | awk '{print $3}')
        fi
        if [[ ! -z $(command -v efibootmgr) ]]; then
           get_wbmoption && efibootvars="true"
@@ -872,35 +872,38 @@ else
           if [[ "$unsysmnt" == "true" ]]; then restore_system; fi
           exit 1
        fi
-       if   [[ -f "$localmgrpath" && -f "$localuwfpath" && -f "$localvhdpath" ]]; then
-            localuwfver=$(peres -v "$localuwfpath" | grep 'Product Version:' | awk '{print $3}')
-            localvhdver=$(peres -v "$localvhdpath" | grep 'Product Version:' | awk '{print $3}')
-       elif [[ -f "$localmgrpath" && -f "$localmempath" ]]; then
-            localmemver=$(peres -v "$localmempath" | grep 'Product Version:' | awk '{print $3}')
-            localuwfver="NULL"
-            localvhdver="NULL"
+       if   [[ -f "$localmgrpath" ]]; then
+            if   [[ -f "$localuwfpath" && -f "$localvhdpath" ]]; then
+                 localuwfver=$(peres -v "$localuwfpath" 2> /dev/null | grep 'Product Version:' | awk '{print $3}')
+                 localvhdver=$(peres -v "$localvhdpath" 2> /dev/null | grep 'Product Version:' | awk '{print $3}')
+            else
+                 localuwfver="NULL"
+                 localvhdver="NULL"
+            fi
+            localmemver=$(peres -v "$localmempath" 2> /dev/null | grep 'Product Version:' | awk '{print $3}')
        else
-           if  [[ "$virtual" == "true" ]]; then
-               echo -e "${RED}Unable to find the BIOS boot files at $vrtpath${NC}"
-               umount_vpart
-           else
-               echo -e "${RED}Unable to find the BIOS boot files at $winpath${NC}"
-           fi
-           if [[ "$rmsysmnt" == "true" ]]; then umount_system; fi
-           if [[ "$unsysmnt" == "true" ]]; then restore_system; fi
-           exit 1
+            if  [[ "$virtual" == "true" ]]; then
+                echo -e "${RED}Unable to find the BIOS boot files at $vrtpath${NC}"
+                umount_vpart
+            else
+                echo -e "${RED}Unable to find the BIOS boot files at $winpath${NC}"
+            fi
+            if [[ "$rmsysmnt" == "true" ]]; then umount_system; fi
+            if [[ "$unsysmnt" == "true" ]]; then restore_system; fi
+            exit 1
        fi
-       if   test -f "$syspath/bootmgr" && test -f "$sysuwfpath" && test -f "$sysvhdpath"; then
-            sysuwfver=$(peres -v "$sysuwfpath" | grep 'Product Version:' | awk '{print $3}')
-            sysvhdver=$(peres -v "$sysvhdpath" | grep 'Product Version:' | awk '{print $3}')
-            sysbtmgr="true"
-       elif test -f "$syspath/bootmgr" && test -f "$sysmempath"; then
-            sysmemver=$(peres -v "$sysmempath" | grep 'Product Version:' | awk '{print $3}')
-            sysuwfver="NULL"
-            sysvhdver="NULL"
-            sysbtmgr="true"
+       if [[ -f "$syspath/bootmgr" ]]; then
+          if   [[ -f "$sysuwfpath" && -f "$sysvhdpath" ]]; then
+               sysuwfver=$(peres -v "$sysuwfpath" 2> /dev/null | grep 'Product Version:' | awk '{print $3}')
+               sysvhdver=$(peres -v "$sysvhdpath" 2> /dev/null | grep 'Product Version:' | awk '{print $3}')
+          else
+               sysuwfver="NULL"
+               sysvhdver="NULL"
+          fi
+          sysmemver=$(peres -v "$sysmempath" 2> /dev/null | grep 'Product Version:' | awk '{print $3}')
+          sysbtmgr="true"
        fi
-       if ! test -f "$sysuwfpath" && ! test -f "$sysvhdpath"; then
+       if [[ "$sysbtmgr" == "false" ]]; then
           if  [[ "$virtual" == "true" ]]; then
               copy_bootmgr "$vrtpath" "$syspath" "$fwmode" "$sysfstype"
           else
