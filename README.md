@@ -58,17 +58,32 @@ bcd-sys -l en-us /media/user/mountpoint
 bcd-sys -c /media/user/mountpoint
 ```
 
-## Installation
+## How To Use
 
-Download from Releases or clone the repository.
+**AppImage**
+
+Download the portable AppImage version from Releases, make executable and run from terminal.
+```
+chmod +x bcd-sys-*-x86_64.AppImage
+```
+```
+bcd-sys-*-x86_64.AppImage /media/user/mountpoint
+```
+> [!NOTE]
+> All dependancies provided and no install/uninstall required.
+
+---
+
+**Installation**
+
+Download the scripts from Releases or clone the repository.
 ```
 git clone https://github.com/jpz4085/bcd-sys.git
 ```
 
 Enter the folder for your platform and run for temporary usage.
 ```
-cd $(uname)
-./bcdsys.sh /media/user/mountpoint
+cd $(uname) && ./bcdsys.sh /media/user/mountpoint
 ```
 
 Install or uninstall using the setup script if desired.
