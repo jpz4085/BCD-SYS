@@ -57,14 +57,14 @@ else
 fi
 
 if  [[ "$virtual" == "true" ]]; then
-    virtpart=$(lsblk -o path,mountpoint | grep "$vhdmount" | awk '{print $1}' | uniq)
+    virtpart=$(findmnt -nT "$vhdmount" -o SOURCE)
     virtdisk=$(echo $virtpart | sed 's/p[0-9]\+$//')
     vtscheme=$(sudo sfdisk -l $virtdisk | grep "Disklabel type:" | awk '{print $3}')
-    physpart=$(lsblk -o path,mountpoint | grep "$imgmount" | awk '{print $1}' | uniq)
+    physpart=$(findmnt -nT "$imgmount" -o SOURCE)
     physdisk=$(echo $physpart | sed 's/[0-9]\+$//;s/p\+$//')
     pyscheme=$(sudo sfdisk -l $physdisk | grep "Disklabel type:" | awk '{print $3}')
 else    
-    part=$(lsblk -o path,mountpoint | grep "$mntpoint" | awk '{print $1}' | uniq)
+    part=$(findmnt -nT "$mntpoint" -o SOURCE)
     disk=$(echo $part | sed 's/[0-9]\+$//;s/p\+$//')
     scheme=$(sudo sfdisk -l $disk | grep "Disklabel type:" | awk '{print $3}')
 fi

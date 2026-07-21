@@ -249,8 +249,8 @@ if   [[ "$firmware" == "uefi" ]]; then
              exit 1
           fi
      fi
-     efifstype=$(lsblk -o path,fstype | grep "$efipart" | awk '{print $2}' | uniq)
-     syspath=$(lsblk -o path,mountpoint | grep "$efipart" | awk -v n=2 '{ for (i=n; i<=NF; i++) printf "%s%s", $i, (i<NF ? OFS : ORS)}' | uniq)
+     efifstype=$(lsblk -no FSTYPE "$efipart" | head -n1)
+     syspath="$(findmnt -n -S $efipart -o TARGET | head -n1)"
      if   [[ -z "${syspath// }" ]]; then
           rmsysmnt="true"
           syspath="/mnt/EFI"
@@ -328,8 +328,8 @@ elif [[ "$firmware" == "bios" || "$firmware" == "both" ]]; then
              exit 1
           fi
      fi
-     sysfstype=$(lsblk -o path,fstype | grep "$syspart" | awk '{print $2}' | uniq)
-     syspath=$(lsblk -o path,mountpoint | grep "$syspart" | awk -v n=2 '{ for (i=n; i<=NF; i++) printf "%s%s", $i, (i<NF ? OFS : ORS)}' | uniq)
+     sysfstype=$(lsblk -no FSTYPE "$syspart" | head -n1)
+     syspath="$(findmnt -n -S $syspart -o TARGET | head -n1)"
      if   [[ -z "${syspath// }" ]]; then
           rmsysmnt="true"
           syspath="/mnt/winsys"
@@ -380,9 +380,9 @@ if   [[ "$firmware" == "uefi" ]]; then
      if [[ "$virtual" == "false" || "$verbose" == "true" ]]; then
         echo "Get block device for mount point (sudo required later)..."
      fi
-     efipart=$(lsblk -o path,mountpoint | grep "$syspath" | awk '{print $1}' | uniq)
+     efipart=$(findmnt -nT "$syspath" -o SOURCE)
      efidisk=$(printf "$efipart" | sed 's/[0-9]\+$//;s/p\+$//')
-     efifstype=$(lsblk -o path,fstype | grep "$efipart" | awk '{print $2}' | uniq)
+     efifstype=$(lsblk -no FSTYPE "$efipart" | head -n1)
      efischeme=$(sudo sfdisk -l $efidisk | grep "Disklabel type:" | awk '{print $3}')
      if [[ "$efischeme" != "gpt" && "$efischeme" != "dos" ]]; then
         echo "${BGTYELLOW}ESP disk $efidisk is using $efischeme partition scheme.${NC}"
@@ -391,7 +391,7 @@ if   [[ "$firmware" == "uefi" ]]; then
         exit 1
      fi
 elif [[ "$firmware" == "bios" || "$firmware" == "both" ]]; then
-     syspart=$(lsblk -o path,mountpoint | grep "$syspath" | awk '{print $1}' | uniq)
+     syspart=$(findmnt -nT "$syspath" -o SOURCE)
      sysdisk=$(printf "$syspart" | sed 's/[0-9]\+$//;s/p\+$//')
      if [[ "$virtual" == "false" || "$verbose" == "true" ]]; then
         echo "Checking block device for active partition (sudo required)..."
@@ -428,7 +428,7 @@ elif [[ "$firmware" == "bios" || "$firmware" == "both" ]]; then
              exit 1
           fi
      fi
-     sysfstype=$(lsblk -o path,fstype | grep "$syspart" | awk '{print $2}' | uniq)
+     sysfstype=$(lsblk -no FSTYPE "$syspart" | head -n1)
      if [[ "$firmware" == "both" ]]; then
         efipart="$syspart"
         efifstype="$sysfstype"
