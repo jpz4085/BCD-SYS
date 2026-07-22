@@ -18,7 +18,6 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 firmware=$(test -d /sys/firmware/efi && echo uefi || echo bios)
-mntopts="rw,nosuid,nodev,relatime,uid=$(id -u),gid=$(id -g),iocharset=utf8"
 setfwmod="false"
 createbcd="true"
 prewbmdef="false"
@@ -220,18 +219,18 @@ windisk="$2"
 
 if   [[ "$firmware" == "uefi" ]]; then
      if [[ "$virtual" == "false" || "$verbose" == "true" ]]; then
-        echo "Checking block devices for ESP (sudo required)..."
+        echo "Checking block devices for ESP$ending"
      fi
-     efipart=$(sudo sfdisk -o device,type -l "$windisk" | grep "EFI" | awk '{print $1}')
+     efipart=$($SFDISK -o device,type -l "$windisk" | grep "EFI" | awk '{print $1}')
      efidisk="$windisk"
      if [[ -z "$efipart" ]]; then
-        efipart=$(sudo sfdisk -o device,type -l /dev/sda | grep "EFI" | awk '{print $1}')
+        efipart=$($SFDISK -o device,type -l /dev/sda | grep "EFI" | awk '{print $1}')
         efidisk="/dev/sda"
      fi
      if [[ -z "$efipart" ]]; then
         rootdisk=$(findmnt -n -o SOURCE / | sed 's/[0-9]\+$//;s/p\+$//')
         if [[ "$rootdisk" != "$windisk" && "$rootdisk" != "/dev/sda" ]]; then
-           efipart=$(sudo sfdisk -o device,type -l "$rootdisk" | grep "EFI" | awk '{print $1}')
+           efipart=$($SFDISK -o device,type -l "$rootdisk" | grep "EFI" | awk '{print $1}')
            efidisk="$rootdisk"
         fi
      fi
@@ -241,7 +240,7 @@ if   [[ "$firmware" == "uefi" ]]; then
           if [[ "$virtual" == "true" ]]; then umount_vpart; fi
           exit 1
      else
-          efischeme=$(sudo sfdisk -l $efidisk | grep "Disklabel type:" | awk '{print $3}')
+          efischeme=$($SFDISK -l $efidisk | grep "Disklabel type:" | awk '{print $3}')
           if [[ "$efischeme" != "gpt" && "$efischeme" != "dos" ]]; then
              echo "${BGTYELLOW}ESP disk $efidisk is using $efischeme partition scheme.${NC}"
              echo -e "${RED}Partition scheme must be GPT or DOS type.${NC}"
@@ -254,41 +253,42 @@ if   [[ "$firmware" == "uefi" ]]; then
      if   [[ -z "${syspath// }" ]]; then
           rmsysmnt="true"
           syspath="/mnt/EFI"
-          sudo mkdir -p $syspath
+          $MKDIR -p $syspath
           if [[ "$verbose" == "true" ]]; then echo "Mounting ESP on $efipart"; fi
           if  [[ "$efifstype" == "ntfs" ]]; then
               if [[ "$mntopts" != *",windows_names" ]]; then
                  mntopts+=",windows_names"
               fi
-              sudo mount -t ntfs3 -o"$mntopts" $efipart $syspath
+              $MOUNT -t ntfs3 -o"$mntopts" $efipart $syspath
           else
-              sudo mount -o "$mntopts" $efipart $syspath
+              $MOUNT -o "$mntopts" $efipart $syspath
           fi
      else
           if [[ "$efifstype" == "vfat" && ! -w "$syspath" ]]; then
              if [[ "$verbose" == "true" ]]; then echo "Remounting ESP on $efipart"; fi
              unsysmnt="true"
-             if   sudo umount "$syspath"; then
-                  if ! sudo mount -o "$mntopts" $efipart "$syspath" 2> /dev/null; then
+             if   $UMOUNT "$syspath"; then
+                  if ! $MOUNT -o "$mntopts" $efipart "$syspath" 2> /dev/null; then
                      sysmfail="true"
                      sysorig="$syspath"
                      syspath="/mnt/EFI"
-                     sudo mkdir -p $syspath
-                     sudo mount -o "$mntopts" $efipart "$syspath"
+                     $MKDIR -p $syspath
+                     $MOUNT -o "$mntopts" $efipart "$syspath"
                   fi
              else
                   echo -e "${RED}Failed to unmount EFI System Partition.${NC}"
+                  if [[ "$virtual" == "true" ]]; then umount_vpart; fi
                   exit 1
              fi
           fi
      fi
 elif [[ "$firmware" == "bios" || "$firmware" == "both" ]]; then
      if [[ "$virtual" == "false" || "$verbose" == "true" ]]; then
-        echo "Checking block devices for active partition (sudo required)..."
+        echo "Checking block devices for active partition$ending"
      fi
      sysdisk="$windisk"
-     syspart=$(sudo sfdisk -o device,boot -l "$windisk" 2>/dev/null | grep -E '/dev/.*\*' | awk '{print $1}')
-     errormsg=$(sudo sfdisk -o device,boot -l "$windisk" 2>&1>/dev/null)
+     syspart=$($SFDISK -o device,boot -l "$windisk" 2>/dev/null | grep -E '/dev/.*\*' | awk '{print $1}')
+     errormsg=$($SFDISK -o device,boot -l "$windisk" 2>&1>/dev/null)
      if [[ "$errormsg" == "sfdisk: gpt unknown column: boot" ]]; then
         if [[ "$virtual" == "true" ]]; then umount_vpart; fi
         echo -e "${BGTYELLOW}Windows disk $windisk is using GPT partition scheme.${NC}"
@@ -297,8 +297,8 @@ elif [[ "$firmware" == "bios" || "$firmware" == "both" ]]; then
      fi
      if [[ -z "$syspart" ]]; then
         sysdisk="/dev/sda"
-        syspart=$(sudo sfdisk -o device,boot -l /dev/sda 2>/dev/null | grep -E '/dev/.*\*' | awk '{print $1}')
-        errormsg=$(sudo sfdisk -o device,boot -l /dev/sda 2>&1>/dev/null)
+        syspart=$($SFDISK -o device,boot -l /dev/sda 2>/dev/null | grep -E '/dev/.*\*' | awk '{print $1}')
+        errormsg=$($SFDISK -o device,boot -l /dev/sda 2>&1>/dev/null)
         if [[ "$errormsg" == "sfdisk: gpt unknown column: boot" ]]; then
            echo -e "${BGTYELLOW}First block device (sda) is using GPT partition scheme.${NC}"
         fi
@@ -307,8 +307,8 @@ elif [[ "$firmware" == "bios" || "$firmware" == "both" ]]; then
         rootdisk=$(findmnt -n -o SOURCE / | sed 's/[0-9]\+$//;s/p\+$//')
         if [[ "$rootdisk" != "$windisk" && "$rootdisk" != "/dev/sda" ]]; then
            sysdisk="$rootdisk"
-           syspart=$(sudo sfdisk -o device,boot -l "$rootdisk" 2>/dev/null | grep -E '/dev/.*\*' | awk '{print $1}')
-           errormsg=$(sudo sfdisk -o device,boot -l "$rootdisk" 2>&1>/dev/null)
+           syspart=$($SFDISK -o device,boot -l "$rootdisk" 2>/dev/null | grep -E '/dev/.*\*' | awk '{print $1}')
+           errormsg=$($SFDISK -o device,boot -l "$rootdisk" 2>&1>/dev/null)
            if [[ "$errormsg" == "sfdisk: gpt unknown column: boot" ]]; then
               echo -e "${BGTYELLOW}Root device $rootdisk is using GPT partition scheme.${NC}"
            fi
@@ -320,7 +320,7 @@ elif [[ "$firmware" == "bios" || "$firmware" == "both" ]]; then
           if [[ "$virtual" == "true" ]]; then umount_vpart; fi
           exit 1
      else
-          syscheme=$(sudo sfdisk -l $sysdisk | grep "Disklabel type:" | awk '{print $3}')
+          syscheme=$($SFDISK -l $sysdisk | grep "Disklabel type:" | awk '{print $3}')
           if [[ "$syscheme" != "dos" ]]; then
              echo "${BGTYELLOW}System disk $sysdisk is using $syscheme partition scheme.${NC}"
              echo -e "${RED}Partition scheme must be DOS type.${NC}"
@@ -333,30 +333,31 @@ elif [[ "$firmware" == "bios" || "$firmware" == "both" ]]; then
      if   [[ -z "${syspath// }" ]]; then
           rmsysmnt="true"
           syspath="/mnt/winsys"
-          sudo mkdir -p $syspath
+          $MKDIR -p $syspath
           if [[ "$verbose" == "true" ]]; then echo "Mounting active partition on $syspart"; fi
           if  [[ "$sysfstype" == "ntfs" ]]; then
               if [[ "$mntopts" != *",windows_names" ]]; then
                  mntopts+=",windows_names"
               fi
-              sudo mount -t ntfs3 -o"$mntopts" $syspart $syspath
+              $MOUNT -t ntfs3 -o"$mntopts" $syspart $syspath
           else
-              sudo mount -o "$mntopts" $syspart $syspath
+              $MOUNT -o "$mntopts" $syspart $syspath
           fi
      else
           if  [[ "$sysfstype" == "vfat" && ! -w "$syspath" ]]; then
               if [[ "$verbose" == "true" ]]; then echo "Remounting active partition on $syspart"; fi
               unsysmnt="true"
-              if   sudo umount "$syspath"; then
-                   if ! sudo mount -o "$mntopts" $syspart "$syspath" 2> /dev/null; then
+              if   $UMOUNT "$syspath"; then
+                   if ! $MOUNT -o "$mntopts" $syspart "$syspath" 2> /dev/null; then
                       sysmfail="true"
                       sysorig="$syspath"
                       syspath="/mnt/winsys"
-                      sudo mkdir -p $syspath
-                      sudo mount -o "$mntopts" $syspart "$syspath"
+                      $MKDIR -p $syspath
+                      $MOUNT -o "$mntopts" $syspart "$syspath"
                    fi
               else
                    echo -e "${RED}Failed to unmount the active partition.${NC}"
+                   if [[ "$virtual" == "true" ]]; then umount_vpart; fi
                    exit 1
               fi
           fi
@@ -366,6 +367,11 @@ elif [[ "$firmware" == "bios" || "$firmware" == "both" ]]; then
         efifstype="$sysfstype"
         efidisk=$(printf "$efipart" | sed 's/[0-9]\+$//;s/p\+$//')
      fi
+fi
+if [[ ! -w "$syspath" ]]; then
+   echo -e "${RED}The system volume at '$syspath' is not writable.${NC}"
+   if [[ "$virtual" == "true" ]]; then umount_vpart; fi
+   exit 1
 fi
 }
 
@@ -378,12 +384,12 @@ syspath="$2"
 
 if   [[ "$firmware" == "uefi" ]]; then
      if [[ "$virtual" == "false" || "$verbose" == "true" ]]; then
-        echo "Get block device for mount point (sudo required later)..."
+        echo "Get block device for mount point$ending"
      fi
      efipart=$(findmnt -nT "$syspath" -o SOURCE)
      efidisk=$(printf "$efipart" | sed 's/[0-9]\+$//;s/p\+$//')
      efifstype=$(lsblk -no FSTYPE "$efipart" | head -n1)
-     efischeme=$(sudo sfdisk -l $efidisk | grep "Disklabel type:" | awk '{print $3}')
+     efischeme=$($SFDISK -l $efidisk | grep "Disklabel type:" | awk '{print $3}')
      if [[ "$efischeme" != "gpt" && "$efischeme" != "dos" ]]; then
         echo "${BGTYELLOW}ESP disk $efidisk is using $efischeme partition scheme.${NC}"
         echo -e "${RED}Partition scheme must be GPT or DOS type.${NC}"
@@ -394,17 +400,17 @@ elif [[ "$firmware" == "bios" || "$firmware" == "both" ]]; then
      syspart=$(findmnt -nT "$syspath" -o SOURCE)
      sysdisk=$(printf "$syspart" | sed 's/[0-9]\+$//;s/p\+$//')
      if [[ "$virtual" == "false" || "$verbose" == "true" ]]; then
-        echo "Checking block device for active partition (sudo required)..."
+        echo "Checking block device for active partition$ending"
      fi
-     errormsg=$(sudo sfdisk -o device,boot -l "$windisk" 2>&1>/dev/null)
+     errormsg=$($SFDISK -o device,boot -l "$windisk" 2>&1>/dev/null)
      if [[ "$errormsg" == "sfdisk: gpt unknown column: boot" ]]; then
         if [[ "$virtual" == "true" ]]; then umount_vpart; fi
         echo -e "${BGTYELLOW}Windows disk $windisk is using GPT partition scheme.${NC}"
         echo -e "${RED}This configuration is not compatible with Windows in BIOS mode.${NC}"
         exit 1
      fi
-     actpart=$(sudo sfdisk -o device,boot -l "$sysdisk" 2>/dev/null | grep -E '/dev/.*\*' | awk '{print $1}')
-     errormsg=$(sudo sfdisk -o device,boot -l "$sysdisk" 2>&1>/dev/null)
+     actpart=$($SFDISK -o device,boot -l "$sysdisk" 2>/dev/null | grep -E '/dev/.*\*' | awk '{print $1}')
+     errormsg=$($SFDISK -o device,boot -l "$sysdisk" 2>&1>/dev/null)
      if [[ "$errormsg" == "sfdisk: gpt unknown column: boot" ]]; then
         if [[ "$virtual" == "true" ]]; then umount_vpart; fi
         echo -e "${BGTYELLOW}System disk $sysdisk is using GPT partition scheme.${NC}"
@@ -420,7 +426,7 @@ elif [[ "$firmware" == "bios" || "$firmware" == "both" ]]; then
           if [[ "$virtual" == "true" ]]; then umount_vpart; fi
           exit 1
      else
-          syscheme=$(sudo sfdisk -l $sysdisk | grep "Disklabel type:" | awk '{print $3}')
+          syscheme=$($SFDISK -l $sysdisk | grep "Disklabel type:" | awk '{print $3}')
           if [[ "$syscheme" != "dos" ]]; then
              echo "${BGTYELLOW}System disk $sysdisk is using $syscheme partition scheme.${NC}"
              echo -e "${RED}Partition scheme must be DOS type.${NC}"
@@ -434,6 +440,11 @@ elif [[ "$firmware" == "bios" || "$firmware" == "both" ]]; then
         efifstype="$sysfstype"
      fi
 fi
+if [[ ! -w "$syspath" ]]; then
+   echo -e "${RED}The system volume at '$syspath' is not writable.${NC}"
+   if [[ "$virtual" == "true" ]]; then umount_vpart; fi
+   exit 1
+fi
 }
 
 # Load the NBD module if needed then find a free block device to use.
@@ -442,9 +453,9 @@ errormsg=$(modinfo nbd 2>&1>/dev/null)
 if [[ -z $(command -v qemu-nbd) ]]; then missing+=" qemu-utils"; fi
 if [[ "$errormsg" == "modinfo: ERROR: Module nbd not found." ]]; then missing+=" nbd-client"; fi
 requirements_message
-echo "Attach virtual disk to network block device (sudo required)..."
+echo "Attach virtual disk to network block device$ending"
 if ! lsmod | grep -wq nbd; then
-   sudo modprobe nbd max_part=10
+   $MODCMD nbd max_part=10
    unloadnbd="true"
 fi
 for x in /sys/class/block/nbd*; do
@@ -454,14 +465,14 @@ for x in /sys/class/block/nbd*; do
        break
     fi
 done
-sudo qemu-nbd -c "$vrtdisk" "$imgpath"
-vhdscheme=$(sudo sfdisk -l $vrtdisk | grep "Disklabel type:" | awk '{print $3}')
+$NBDCMD -c "$vrtdisk" "$imgpath"
+vhdscheme=$($SFDISK -l $vrtdisk | grep "Disklabel type:" | awk '{print $3}')
 if [[ "$vhdscheme" != "gpt" && "$vhdscheme" != "dos" ]]; then
    echo "${BGTYELLOW}Virtual disk is using $vhdscheme partition scheme.${NC}"
    echo -e "${RED}Partition scheme must be GPT or DOS type.${NC}"
-   sudo qemu-nbd -d "$vrtdisk" > /dev/null
+   $NBDCMD -d "$vrtdisk" > /dev/null
    if [[ "$unloadnbd" == "true" ]]; then
-      sleep 1 && sudo rmmod nbd
+      sleep 1 && $RMMOD nbd
    fi
    exit 1
 fi
@@ -480,17 +491,17 @@ while [[ "$vtwinpart" != *"nbd"* || ! -e "/dev/$vtwinpart" ]]; do
       read -p "Enter device containing the Windows volume [nbd#p#]:" vtwinpart
 done
 mntopts+=",windows_names"
-sudo mkdir -p "$vrtpath" && sudo mount -t ntfs3 -o "$mntopts" /dev/$vtwinpart "$vrtpath"
+$MKDIR -p "$vrtpath" && $MOUNT -t ntfs3 -o "$mntopts" /dev/$vtwinpart "$vrtpath"
 }
 
 # Unmount volume and detach virtual disk then unload NBD module if no longer needed.
 umount_vpart () {
 if [[ "$verbose" == "true" ]]; then echo "Removing temporary VHDX mount point..."; fi
-sudo umount "$vrtpath" && sudo rm -rf "$vrtpath"
+$UMOUNT "$vrtpath" && $RM -rf "$vrtpath"
 if [[ "$verbose" == "true" ]]; then echo "Detach virtual disk from block device..."; fi
-sudo qemu-nbd -d "$vrtdisk" > /dev/null
+$NBDCMD -d "$vrtdisk" > /dev/null
 if [[ "$unloadnbd" == "true" ]]; then
-   sleep 1 && sudo rmmod nbd
+   sleep 1 && $RMMOD nbd
 fi
 }
 
@@ -501,27 +512,27 @@ if   [[ "$syspath" == "/mnt/EFI" ]]; then
 elif [[ "$syspath" == "/mnt/winsys" ]]; then
      if [[ "$verbose" == "true" ]]; then echo "Removing temporary system mount point..."; fi
 fi
-sudo umount "$syspath" && sudo rm -rf "$syspath"
+$UMOUNT "$syspath" && $RM -rf "$syspath"
 }
 
 # Remount the EFI or Windows System Partition to the original location with default options.
 # Display a warning if original mount point is unavailable and remove the temporary directory.
 restore_system () {
-sudo umount "$syspath"
-if [[ "$sysmfail" == "true" ]]; then sudo rm -rf "$syspath"; fi
+$UMOUNT "$syspath"
+if [[ "$sysmfail" == "true" ]]; then $RM -rf "$syspath"; fi
 if   [[ "$firmware" == "uefi" ]]; then
      if   [[ "$sysmfail" == "true" ]]; then
           echo -e "${BGTYELLOW}Unable to restore original ESP mount point: $sysorig${NC}"
      else
           if [[ "$verbose" == "true" ]]; then echo "Restore default ESP mount options..."; fi
-          sudo mount $efipart "$syspath"
+          $MOUNT $efipart "$syspath"
      fi
 elif [[ "$firmware" == "bios" || "$firmware" == "both" ]]; then
      if   [[ "$sysmfail" == "true" ]]; then
           echo -e "${BGTYELLOW}Unable to restore original system mount point: $sysorig${NC}"
      else
           if [[ "$verbose" == "true" ]]; then echo "Restore default system mount options..."; fi
-          sudo mount $syspart "$syspath"
+          $MOUNT $syspart "$syspath"
      fi
 fi
 }
@@ -555,10 +566,19 @@ fi
 # Script starts here.
 if [[ $(uname) != "Linux" ]]; then echo "Unsupported platform detected."; exit 1; fi
 
-#Root privileges will only be used when needed.
-if [[ $EUID -eq 0 ]]; then
-   echo "This utility should NOT be run as root." >&2
-   exit 1
+#Commands will be elevated as needed when not running as root.
+if   [[ $EUID -eq 0 ]]; then
+     ending="..."
+     SFDISK='sfdisk'; MOUNT='mount'; UMOUNT='umount'
+     MKDIR='mkdir'; NBDCMD='qemu-nbd'; RMMOD='rmmod'
+     MODCMD='modprobe'; RM='rm'; EFIBOOTCMD='efibootmgr'
+     mntopts='rw,nosuid,nodev,relatime,iocharset=utf8'
+else
+     ending=" (sudo required)..."
+     SFDISK='sudo sfdisk'; MOUNT='sudo mount'; UMOUNT='sudo umount'
+     MKDIR='sudo mkdir'; NBDCMD='sudo qemu-nbd'; MODCMD='sudo modprobe'
+     RMMOD='sudo rmmod'; RM='sudo rm'; EFIBOOTCMD='sudo efibootmgr'
+     mntopts="rw,nosuid,nodev,relatime,uid=$(id -u),gid=$(id -g),iocharset=utf8"
 fi
 
 if [[ $# -eq 0 ]]; then usage; fi
@@ -747,16 +767,16 @@ else
             if [[ "$setfwmod" == "false" && "$efibootvars" == "true" ]]; then
                if [[ ! -z "$wbmoptnum" ]]; then
                   if [[ "$verbose" == "true" ]]; then echo "Remove the current Windows Boot Manager option..."; fi
-                  sudo efibootmgr -b "$wbmoptnum" -B > /dev/null
+                  $EFIBOOTCMD -b "$wbmoptnum" -B > /dev/null
                fi
                if [[ "$verbose" == "true" ]]; then echo "Add the Windows Boot Manager to the firmware..."; fi
-               sudo efibootmgr -c -d "$efidisk" -p "$efinum" -l "$wbmefipath" -L "Windows Boot Manager" \
+               $EFIBOOTCMD -c -d "$efidisk" -p "$efinum" -l "$wbmefipath" -L "Windows Boot Manager" \
                                -@ $wbmoptpath/wbmoptdata.bin > /dev/null
                get_wbmoption && create_wbmfwvar "$wbmoptnum" "$syspath"
                if [[ "$setwbmlast" == "true" ]]; then
                   bootorder=$(efibootmgr | grep BootOrder: | awk '{print $2}' | sed "s/$wbmoptnum,//")
                   bootorder+=",$wbmoptnum"
-                  sudo efibootmgr -o "$bootorder" > /dev/null
+                  $EFIBOOTCMD -o "$bootorder" > /dev/null
                fi
             fi
        elif test -f "$syswbmpath" && [[ "$clean" == "true" ]]; then
@@ -785,13 +805,13 @@ else
             if [[ "$setfwmod" == "false" && "$efibootvars" == "true" ]]; then
                if [[ -z "$wbmoptnum" ]]; then
                   if [[ "$verbose" == "true" ]]; then echo "Add the Windows Boot Manager to the firmware..."; fi
-                  sudo efibootmgr -c -d "$efidisk" -p "$efinum" -l "$wbmefipath" -L "Windows Boot Manager" \
+                  $EFIBOOTCMD -c -d "$efidisk" -p "$efinum" -l "$wbmefipath" -L "Windows Boot Manager" \
                                   -@ $wbmoptpath/wbmoptdata.bin > /dev/null
                   get_wbmoption
                   if [[ "$setwbmlast" == "true" ]]; then
                      bootorder=$(efibootmgr | grep BootOrder: | awk '{print $2}' | sed "s/$wbmoptnum,//")
                      bootorder+=",$wbmoptnum"
-                     sudo efibootmgr -o "$bootorder" > /dev/null
+                     $EFIBOOTCMD -o "$bootorder" > /dev/null
                   fi
                fi
                create_wbmfwvar "$wbmoptnum" "$syspath"
@@ -823,13 +843,13 @@ else
             fi
             if [[ "$setfwmod" == "false" && "$efibootvars" == "true" && -z "$wbmoptnum" ]]; then
                if [[ "$verbose" == "true" ]]; then echo "Add the Windows Boot Manager to the firmware..."; fi
-               sudo efibootmgr -c -d "$efidisk" -p "$efinum" -l "$wbmefipath" -L "Windows Boot Manager" \
+               $EFIBOOTCMD -c -d "$efidisk" -p "$efinum" -l "$wbmefipath" -L "Windows Boot Manager" \
                                -@ $wbmoptpath/wbmoptdata.bin > /dev/null
                get_wbmoption && create_wbmfwvar "$wbmoptnum" "$syspath"
                if [[ "$setwbmlast" == "true" ]]; then
                   bootorder=$(efibootmgr | grep BootOrder: | awk '{print $2}' | sed "s/$wbmoptnum,//")
                   bootorder+=",$wbmoptnum"
-                  sudo efibootmgr -o "$bootorder" > /dev/null
+                  $EFIBOOTCMD -o "$bootorder" > /dev/null
                fi
             fi
        fi
