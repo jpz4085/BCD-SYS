@@ -56,45 +56,51 @@ else
     mntpoint="$1"
 fi
 
+if   [[ $EUID -eq 0 ]]; then
+     SFDISK='sfdisk'; BLKDEV='blockdev'
+else
+     SFDISK='sudo sfdisk'; BLKDEV='sudo blockdev'
+fi
+
 if  [[ "$virtual" == "true" ]]; then
     virtpart=$(findmnt -nT "$vhdmount" -o SOURCE)
     virtdisk=$(echo $virtpart | sed 's/p[0-9]\+$//')
-    vtscheme=$(sudo sfdisk -l $virtdisk | grep "Disklabel type:" | awk '{print $3}')
+    vtscheme=$($SFDISK -l $virtdisk | grep "Disklabel type:" | awk '{print $3}')
     physpart=$(findmnt -nT "$imgmount" -o SOURCE)
     physdisk=$(echo $physpart | sed 's/[0-9]\+$//;s/p\+$//')
-    pyscheme=$(sudo sfdisk -l $physdisk | grep "Disklabel type:" | awk '{print $3}')
+    pyscheme=$($SFDISK -l $physdisk | grep "Disklabel type:" | awk '{print $3}')
 else    
     part=$(findmnt -nT "$mntpoint" -o SOURCE)
     disk=$(echo $part | sed 's/[0-9]\+$//;s/p\+$//')
-    scheme=$(sudo sfdisk -l $disk | grep "Disklabel type:" | awk '{print $3}')
+    scheme=$($SFDISK -l $disk | grep "Disklabel type:" | awk '{print $3}')
 fi
 
 if  [[ "$virtual" == "true" ]]; then
     if   [[ "$vtscheme" == "gpt" ]]; then
-         vtdiskguid=$(sudo sfdisk -l $virtdisk | grep "Disk identifier:" | awk '{print $3}')
-         vtpartguid=$(sudo sfdisk -o Device,UUID -l $virtdisk | grep $virtpart | awk '{print $2}')
+         vtdiskguid=$($SFDISK -l $virtdisk | grep "Disk identifier:" | awk '{print $3}')
+         vtpartguid=$($SFDISK -o Device,UUID -l $virtdisk | grep $virtpart | awk '{print $2}')
          vtdiskbytes=$(printf "%s" $(guid_bytes $vtdiskguid) | sed 's/.\{2\}/&,/g;s/,$//')
          vtpartbytes=$(printf "%s" $(guid_bytes $vtpartguid) | sed 's/.\{2\}/&,/g;s/,$//')
          vtschemebyte="00"
     elif [[ "$vtscheme" == "dos" ]]; then
-         vtdisksig=$(sudo sfdisk -l $virtdisk | grep "Disk identifier:" | awk '{print $3}')
-         sectors=$(sudo sfdisk -o device,start -l $virtdisk | grep $virtpart | awk '{print $2}')
-         sectsize=$(sudo blockdev --getss $virtdisk)
+         vtdisksig=$($SFDISK -l $virtdisk | grep "Disk identifier:" | awk '{print $3}')
+         sectors=$($SFDISK -o device,start -l $virtdisk | grep $virtpart | awk '{print $2}')
+         sectsize=$($BLKDEV --getss $virtdisk)
          vtpartoffset=$(($sectors * $sectsize))
          vtdiskbytes=$(printf "%s" $(endian $(printf "%032x" "$vtdisksig")) | sed 's/.\{2\}/&,/g;s/,$//')
          vtpartbytes=$(printf "%s" $(endian $(printf "%032x" "$vtpartoffset")) | sed 's/.\{2\}/&,/g;s/,$//')
          vtschemebyte="01"
     fi
     if   [[ "$pyscheme" == "gpt" ]]; then
-         pydiskguid=$(sudo sfdisk -l $physdisk | grep "Disk identifier:" | awk '{print $3}')
-         pypartguid=$(sudo sfdisk -o Device,UUID -l $physdisk | grep $physpart | awk '{print $2}')
+         pydiskguid=$($SFDISK -l $physdisk | grep "Disk identifier:" | awk '{print $3}')
+         pypartguid=$($SFDISK -o Device,UUID -l $physdisk | grep $physpart | awk '{print $2}')
          pydiskbytes=$(printf "%s" $(guid_bytes $pydiskguid) | sed 's/.\{2\}/&,/g;s/,$//')
          pypartbytes=$(printf "%s" $(guid_bytes $pypartguid) | sed 's/.\{2\}/&,/g;s/,$//')
          pyschemebyte="00"
     elif [[ "$pyscheme" == "dos" ]]; then
-         pydisksig=$(sudo sfdisk -l $physdisk | grep "Disk identifier:" | awk '{print $3}')
-         sectors=$(sudo sfdisk -o device,start -l $physdisk | grep $physpart | awk '{print $2}')
-         sectsize=$(sudo blockdev --getss $physdisk)
+         pydisksig=$($SFDISK -l $physdisk | grep "Disk identifier:" | awk '{print $3}')
+         sectors=$($SFDISK -o device,start -l $physdisk | grep $physpart | awk '{print $2}')
+         sectsize=$($BLKDEV --getss $physdisk)
          pypartoffset=$(($sectors * $sectsize))
          pydiskbytes=$(printf "%s" $(endian $(printf "%032x" "$pydisksig")) | sed 's/.\{2\}/&,/g;s/,$//')
          pypartbytes=$(printf "%s" $(endian $(printf "%032x" "$pypartoffset")) | sed 's/.\{2\}/&,/g;s/,$//')
@@ -110,15 +116,15 @@ if  [[ "$virtual" == "true" ]]; then
     printf "hex:3:00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,06,00,00,00,00,00,00,00,$offbyte1,00,00,00,00,00,00,00,$vtpartbytes,06,00,00,00,$vtschemebyte,00,00,00,$vtdiskbytes,00,00,00,00,00,00,00,00,$offbyte2,00,00,00,00,00,00,00,05,00,00,00,01,00,00,00,$offbyte3,00,00,00,05,00,00,00,06,00,00,00,00,00,00,00,48,00,00,00,00,00,00,00,$pypartbytes,00,00,00,00,$pyschemebyte,00,00,00,$pydiskbytes,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,$imgstrbytes,00,00\n"
 else
     if   [[ "$scheme" == "gpt" ]]; then
-         diskguid=$(sudo sfdisk -l $disk | grep "Disk identifier:" | awk '{print $3}')
-         partguid=$(sudo sfdisk -o Device,UUID -l $disk | grep $part | awk '{print $2}')
+         diskguid=$($SFDISK -l $disk | grep "Disk identifier:" | awk '{print $3}')
+         partguid=$($SFDISK -o Device,UUID -l $disk | grep $part | awk '{print $2}')
          diskbytes=$(printf "%s" $(guid_bytes $diskguid) | sed 's/.\{2\}/&,/g;s/,$//')
          partbytes=$(printf "%s" $(guid_bytes $partguid) | sed 's/.\{2\}/&,/g;s/,$//')
          schemebyte="00"
     elif [[ "$scheme" == "dos" ]]; then
-         disksig=$(sudo sfdisk -l $disk | grep "Disk identifier:" | awk '{print $3}')
-         sectors=$(sudo sfdisk -o device,start -l $disk | grep $part | awk '{print $2}')
-         sectsize=$(sudo blockdev --getss $disk)
+         disksig=$($SFDISK -l $disk | grep "Disk identifier:" | awk '{print $3}')
+         sectors=$($SFDISK -o device,start -l $disk | grep $part | awk '{print $2}')
+         sectsize=$($BLKDEV --getss $disk)
          partoffset=$(($sectors * $sectsize))
          diskbytes=$(printf "%s" $(endian $(printf "%032x" "$disksig")) | sed 's/.\{2\}/&,/g;s/,$//')
          partbytes=$(printf "%s" $(endian $(printf "%032x" "$partoffset")) | sed 's/.\{2\}/&,/g;s/,$//')
