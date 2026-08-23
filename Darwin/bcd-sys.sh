@@ -230,12 +230,12 @@ elif [[ "$3" == "bios" ]]; then
         echo "drive s: file=\"$syspart\"" > $mtoolscfg
         echo "mtools_skip_check=1" >> $mtoolscfg
         diskutil unmount $syspart > /dev/null
-        sudo -E mattrib +s +h +r S:/bootmgr
+        $MATTRIB +s +h +r S:/bootmgr
         if [[ -f "$1"/Windows/Boot/PCAT/bootnxt ]]; then
-           sudo -E mattrib +s +h S:/BOOTNXT
+           $MATTRIB +s +h S:/BOOTNXT
         fi
-        sudo -E mattrib +s +h S:/Boot
-        sudo diskutil mount $syspart > /dev/null
+        $MATTRIB +s +h S:/Boot
+        $MOUNT $syspart > /dev/null
      fi
 fi
 }
@@ -250,11 +250,11 @@ firmware="$1"
 windisk="$2"
 
 if   [[ "$firmware" == "uefi" ]]; then
-     echo "Checking block devices for ESP (sudo required)..."
+     echo "Checking block devices for ESP$ending"
      if   [[ "$wptscheme" == "FDisk_partition_scheme" ]]; then
           checkmbr_signature $windisk
      elif [[ "$wptscheme" == "GUID_partition_scheme" ]]; then
-          if [[ ! -z $(sudo fdisk "$windisk" | grep -E '2:|3:|4:' | grep -v unused) ]]; then
+          if [[ ! -z $($FDISK "$windisk" | grep -E '2:|3:|4:' | grep -v unused) ]]; then
              if [[ "$virtual" == "true" ]]; then umount_vpart; fi
              echo -e "${BGTYELLOW}Hybrid MBR detected on $windisk but firmware mode is UEFI.${NC}"
              echo -e "${RED}This configuration is not compatible with Windows in UEFI mode.${NC}"
@@ -275,7 +275,7 @@ if   [[ "$firmware" == "uefi" ]]; then
         if   [[ ! -z $(csrutil status | grep "Filesystem Protections: enabled") ||
                 ! -z $(csrutil status | grep -Fx "System Integrity Protection status: enabled.") ]]; then
              echo -e "${BGTYELLOW}Unable to get device information from startup disk.${NC}"
-        elif [[ ! -z $(sudo fdisk "/dev/$macdisk" | grep -E '2:|3:|4:' | grep -v unused) ]]; then
+        elif [[ ! -z $($FDISK "/dev/$macdisk" | grep -E '2:|3:|4:' | grep -v unused) ]]; then
              echo -e "${BGTYELLOW}Hybrid MBR detected on /dev/$macdisk but firmware mode is UEFI.${NC}"
         else
              efipart=$(diskutil list $macdisk | grep "EFI" | awk '{print $NF}')
@@ -288,7 +288,7 @@ if   [[ "$firmware" == "uefi" ]]; then
                 checkmbr_signature /dev/disk0
                 efipart=$(diskutil list disk0| grep "EFI" | awk '{print $NF}')
            elif [[ "$zptscheme" == "GUID_partition_scheme" ]]; then
-                if   [[ ! -z $(sudo fdisk /dev/disk0 | grep -E '2:|3:|4:' | grep -v unused) ]]; then
+                if   [[ ! -z $($FDISK /dev/disk0 | grep -E '2:|3:|4:' | grep -v unused) ]]; then
                      echo -e "${BGTYELLOW}Hybrid MBR detected on /dev/disk0 but firmware mode is UEFI.${NC}"
                 else
                      efipart=$(diskutil list disk0| grep "EFI" | awk '{print $NF}')
@@ -309,7 +309,7 @@ if   [[ "$firmware" == "uefi" ]]; then
           if [[ "$verbose" == "true" ]]; then echo "Mounting ESP on $efipart"; fi
           rmsysmnt="true"
           if   [[ "$efifsvendor" == "MS-DOS" || "$efifsvendor" == "Tuxera" || "$efifstype" == "UFSD_NTFS" ]]; then
-               sudo diskutil mount $efipart > /dev/null
+               $MOUNT $efipart > /dev/null
           elif [[ "$efifstype" == "NTFS" ]]; then
                if   [[ ! -z $(command -v ntfs-3g) ]]; then
                     mount_ntfs3g $efipart
@@ -330,7 +330,7 @@ if   [[ "$firmware" == "uefi" ]]; then
              rmsysmnt="true"
              diskutil unmount $efipart > /dev/null
              if   [[ "$efifsvendor" == "Tuxera" || "$efifstype" == "UFSD_NTFS" ]]; then
-                  sudo diskutil mount $efipart > /dev/null
+                  $MOUNT $efipart > /dev/null
              elif [[ ! -z $(command -v ntfs-3g) ]]; then
                   mount_ntfs3g $efipart
              else
@@ -346,15 +346,15 @@ if   [[ "$firmware" == "uefi" ]]; then
           fi
      fi
 elif [[ "$firmware" == "bios" || "$firmware" == "both" ]]; then
-     echo "Checking block devices for active partition (sudo required)..."
+     echo "Checking block devices for active partition$ending"
      if   [[ "$wptscheme" == "FDisk_partition_scheme" ]]; then
           checkmbr_signature $windisk
-          actpnum=$(sudo fdisk "$windisk" | grep -E '\*[0-9]' | awk '{print $1}' | sed 's/\*//;s/\://')
+          actpnum=$($FDISK "$windisk" | grep -E '\*[0-9]' | awk '{print $1}' | sed 's/\*//;s/\://')
           if [[ ! -z "$actpnum" ]]; then
              syspart="$windisk"s"$actpnum"
           fi
      elif [[ "$wptscheme" == "GUID_partition_scheme" ]]; then
-          if   [[ ! -z $(sudo fdisk "$windisk" | grep -E '2:|3:|4:' | grep -v unused) ]]; then
+          if   [[ ! -z $($FDISK "$windisk" | grep -E '2:|3:|4:' | grep -v unused) ]]; then
                if   [[ "$verbose" == "true" && "$firmware" == "bios" ]]; then
                     echo "Hybrid MBR detected on $windisk"
                elif [[ "$firmware" == "both" ]]; then
@@ -364,8 +364,8 @@ elif [[ "$firmware" == "bios" || "$firmware" == "both" ]]; then
                     exit 1
                fi
                checkmbr_signature $windisk
-               actpsect=$(sudo fdisk "$windisk" | grep -E '\*[0-9]' | awk '{print $11}')
-               actpnum=$(sudo gpt show "$windisk" 2> /dev/null | grep -w "$actpsect" | awk '{print $3}')
+               actpsect=$($FDISK "$windisk" | grep -E '\*[0-9]' | awk '{print $11}')
+               actpnum=$($GPTCMD show "$windisk" 2> /dev/null | grep -w "$actpsect" | awk '{print $3}')
                if [[ ! -z "$actpnum" ]]; then
                   syspart="$windisk"s"$actpnum"
                fi
@@ -390,12 +390,12 @@ elif [[ "$firmware" == "bios" || "$firmware" == "both" ]]; then
                 ! -z $(csrutil status | grep -Fx "System Integrity Protection status: enabled.") ]]; then
              echo -e "${BGTYELLOW}Unable to get device information from startup disk.${NC}"
         else
-             if   [[ ! -z $(sudo fdisk "/dev/$macdisk" | grep -E '2:|3:|4:' | grep -v unused) ]]; then
+             if   [[ ! -z $($FDISK "/dev/$macdisk" | grep -E '2:|3:|4:' | grep -v unused) ]]; then
                   if   [[ "$firmware" == "bios" ]]; then
                        if [[ "$verbose" == "true" ]]; then echo "Hybrid MBR detected on /dev/$macdisk"; fi
                        checkmbr_signature /dev/$macdisk
-                       actpsect=$(sudo fdisk "/dev/$macdisk" | grep -E '\*[0-9]' | awk '{print $11}')
-                       actpnum=$(sudo gpt show "/dev/$macdisk" 2> /dev/null | grep -w "$actpsect" | awk '{print $3}')
+                       actpsect=$($FDISK "/dev/$macdisk" | grep -E '\*[0-9]' | awk '{print $11}')
+                       actpnum=$($GPTCMD show "/dev/$macdisk" 2> /dev/null | grep -w "$actpsect" | awk '{print $3}')
                        if [[ ! -z "$actpnum" ]]; then
                           syspart="/dev/$macdisk"s"$actpnum"
                        fi
@@ -412,17 +412,17 @@ elif [[ "$firmware" == "bios" || "$firmware" == "both" ]]; then
            zptscheme=$(diskutil info disk0 | grep "Content (IOContent):" | awk '{print $3}')
            if   [[ "$zptscheme" == "FDisk_partition_scheme" ]]; then
                 checkmbr_signature /dev/disk0
-                actpnum=$(sudo fdisk /dev/disk0 | grep -E '\*[0-9]' | awk '{print $1}' | sed 's/\*//;s/\://')
+                actpnum=$($FDISK /dev/disk0 | grep -E '\*[0-9]' | awk '{print $1}' | sed 's/\*//;s/\://')
                 if [[ ! -z "$actpnum" ]]; then
                    syspart="/dev/disk0s$actpnum"
                 fi
            elif [[ "$zptscheme" == "GUID_partition_scheme" ]]; then
-                if   [[ ! -z $(sudo fdisk /dev/disk0 | grep -E '2:|3:|4:' | grep -v unused) ]]; then
+                if   [[ ! -z $($FDISK /dev/disk0 | grep -E '2:|3:|4:' | grep -v unused) ]]; then
                      if   [[ "$firmware" == "bios" ]]; then
                           if [[  "$verbose" == "true" ]]; then echo "Hybrid MBR detected on /dev/disk0"; fi
                           checkmbr_signature /dev/disk0
-                          actpsect=$(sudo fdisk /dev/disk0 | grep -E '\*[0-9]' | awk '{print $11}')
-                          actpnum=$(sudo gpt show /dev/disk0 2> /dev/null | grep -w "$actpsect" | awk '{print $3}')
+                          actpsect=$($FDISK /dev/disk0 | grep -E '\*[0-9]' | awk '{print $11}')
+                          actpnum=$($GPTCMD show /dev/disk0 2> /dev/null | grep -w "$actpsect" | awk '{print $3}')
                           if [[ ! -z "$actpnum" ]]; then
                              syspart="/dev/disk0s$actpnum"
                           fi
@@ -448,7 +448,7 @@ elif [[ "$firmware" == "bios" || "$firmware" == "both" ]]; then
           if [[ "$verbose" == "true" ]]; then echo "Mounting active partition on $syspart"; fi
           rmsysmnt="true"
           if   [[ "$sysfsvendor" == "MS-DOS" || "$sysfsvendor" == "Tuxera" || "$sysfstype" == "UFSD_NTFS" ]]; then
-               sudo diskutil mount $syspart > /dev/null
+               $MOUNT $syspart > /dev/null
           elif [[ "$sysfstype" == "NTFS" ]]; then
                if   [[ ! -z $(command -v ntfs-3g) ]]; then
                     mount_ntfs3g $syspart
@@ -469,7 +469,7 @@ elif [[ "$firmware" == "bios" || "$firmware" == "both" ]]; then
               rmsysmnt="true"
               diskutil unmount $syspart > /dev/null
               if   [[ "$sysfsvendor" == "Tuxera" || "$sysfstype" == "UFSD_NTFS" ]]; then
-                   sudo diskutil mount $syspart > /dev/null
+                   $MOUNT $syspart > /dev/null
               elif [[ ! -z $(command -v ntfs-3g) ]]; then
                    mount_ntfs3g $syspart
               else
@@ -501,11 +501,11 @@ firmware="$1"
 syspath="$2"
 
 if   [[ "$firmware" == "uefi" ]]; then
-     echo "Get block device for mount point (sudo required)..."
+     echo "Get block device for mount point$ending"
      if   [[ "$wptscheme" == "FDisk_partition_scheme" ]]; then
           checkmbr_signature $windisk
      elif [[ "$wptscheme" == "GUID_partition_scheme" ]]; then
-          if [[ ! -z $(sudo fdisk "$windisk" | grep -E '2:|3:|4:' | grep -v unused) ]]; then
+          if [[ ! -z $($FDISK "$windisk" | grep -E '2:|3:|4:' | grep -v unused) ]]; then
              if [[ "$virtual" == "true" ]]; then umount_vpart; fi
              echo -e "${BGTYELLOW}Hybrid MBR detected on $windisk but firmware mode is UEFI.${NC}"
              echo -e "${RED}This configuration is not compatible with Windows in UEFI mode.${NC}"
@@ -548,7 +548,7 @@ if   [[ "$firmware" == "uefi" ]]; then
              echo -e "${RED}Unable to get device information from startup disk.${NC}"
              echo "Disable SIP filesystem protections or specify a system volume."
              exit 1
-        elif [[ ! -z $(sudo fdisk "/dev/$macdisk" | grep -E '2:|3:|4:' | grep -v unused) ]]; then
+        elif [[ ! -z $($FDISK "/dev/$macdisk" | grep -E '2:|3:|4:' | grep -v unused) ]]; then
              if [[ "$virtual" == "true" ]]; then umount_vpart; fi
              echo -e "${BGTYELLOW}Hybrid MBR detected on /dev/$macdisk but firmware mode is UEFI.${NC}"
              echo -e "${RED}This configuration is not compatible with Windows in UEFI mode.${NC}"
@@ -559,7 +559,7 @@ if   [[ "$firmware" == "uefi" ]]; then
         sptscheme=$(diskutil info $efidisk | grep "Content (IOContent):" | awk '{print $3}')
         if [[ "$sptscheme" == "FDisk_partition_scheme" ]]; then checkmbr_signature $efidisk; fi
         if [[ "$sptscheme" == "GUID_partition_scheme" ]]; then
-           if [[ ! -z $(sudo fdisk "$efidisk" | grep -E '2:|3:|4:' | grep -v unused) ]]; then
+           if [[ ! -z $($FDISK "$efidisk" | grep -E '2:|3:|4:' | grep -v unused) ]]; then
               if [[ "$virtual" == "true" ]]; then umount_vpart; fi
               echo -e "${BGTYELLOW}Hybrid MBR detected on $efidisk but firmware mode is UEFI.${NC}"
               echo -e "${RED}This configuration is not compatible with Windows in UEFI mode.${NC}"
@@ -585,7 +585,7 @@ if   [[ "$firmware" == "uefi" ]]; then
         fi
      fi
 elif [[ "$firmware" == "bios" || "$firmware" == "both" ]]; then
-     echo "Checking block device for active partition (sudo required)..."
+     echo "Checking block device for active partition$ending"
      syspart=$(diskutil info "$syspath" | grep "Device Node:" | awk '{print $3}')
      mounted=$(diskutil info "$syspart" | grep "Mounted:" | awk '{print $2}')
      if   [[ "$mounted" == "Yes" ]]; then
@@ -608,7 +608,7 @@ elif [[ "$firmware" == "bios" || "$firmware" == "both" ]]; then
      if   [[ "$wptscheme" == "FDisk_partition_scheme" ]]; then
           checkmbr_signature $windisk
      elif [[ "$wptscheme" == "GUID_partition_scheme" ]]; then
-          if   [[ ! -z $(sudo fdisk "$windisk" | grep -E '2:|3:|4:' | grep -v unused) ]]; then
+          if   [[ ! -z $($FDISK "$windisk" | grep -E '2:|3:|4:' | grep -v unused) ]]; then
                if   [[ "$verbose" == "true" && "$firmware" == "bios" ]]; then
                     echo "Hybrid MBR detected on $windisk"
                elif [[ "$firmware" == "both" ]]; then
@@ -641,7 +641,7 @@ elif [[ "$firmware" == "bios" || "$firmware" == "both" ]]; then
                echo -e "${RED}Unable to get device information from startup disk.${NC}"
                echo "Disable SIP filesystem protections or specify a system volume."
                exit 1
-          elif [[ ! -z $(sudo fdisk "/dev/$macdisk" | grep -E '2:|3:|4:' | grep -v unused) ]]; then
+          elif [[ ! -z $($FDISK "/dev/$macdisk" | grep -E '2:|3:|4:' | grep -v unused) ]]; then
                if   [[ "$verbose" == "true" && "$firmware" == "bios" ]]; then
                     echo "Hybrid MBR detected on $macdisk"
                elif [[ "$firmware" == "both" ]]; then
@@ -651,8 +651,8 @@ elif [[ "$firmware" == "bios" || "$firmware" == "both" ]]; then
                     exit 1
                fi
                checkmbr_signature /dev/$macdisk
-               actpsect=$(sudo fdisk "/dev/$macdisk" | grep -E '\*[0-9]' | awk '{print $11}')
-               actpnum=$(sudo gpt show "/dev/$macdisk" 2> /dev/null | grep -w "$actpsect" | awk '{print $3}')
+               actpsect=$($FDISK "/dev/$macdisk" | grep -E '\*[0-9]' | awk '{print $11}')
+               actpnum=$($GPTCMD show "/dev/$macdisk" 2> /dev/null | grep -w "$actpsect" | awk '{print $3}')
           else
                if [[ "$virtual" == "true" ]]; then umount_vpart; fi
                echo -e "${BGTYELLOW}Startup disk /dev/$macdisk is using GPT partition scheme.${NC}"
@@ -661,18 +661,18 @@ elif [[ "$firmware" == "bios" || "$firmware" == "both" ]]; then
           fi
      elif [[ "$sysdisk" == "$windisk" ]]; then
           if   [[ "$wptscheme" == "FDisk_partition_scheme" ]]; then
-               actpnum=$(sudo fdisk "$windisk" | grep -E '\*[0-9]' | awk '{print $1}' | sed 's/\*//;s/\://')
+               actpnum=$($FDISK "$windisk" | grep -E '\*[0-9]' | awk '{print $1}' | sed 's/\*//;s/\://')
           elif [[ "$wptscheme" == "GUID_partition_scheme" ]]; then
-               actpsect=$(sudo fdisk "$windisk" | grep -E '\*[0-9]' | awk '{print $11}')
-               actpnum=$(sudo gpt show "$windisk" 2> /dev/null | grep -w "$actpsect" | awk '{print $3}')
+               actpsect=$($FDISK "$windisk" | grep -E '\*[0-9]' | awk '{print $11}')
+               actpnum=$($GPTCMD show "$windisk" 2> /dev/null | grep -w "$actpsect" | awk '{print $3}')
           fi
      else
           sptscheme=$(diskutil info $sysdisk | grep "Content (IOContent):" | awk '{print $3}')
           if   [[ "$sptscheme" == "FDisk_partition_scheme" ]]; then
                checkmbr_signature $sysdisk
-               actpnum=$(sudo fdisk "$windisk" | grep -E '\*[0-9]' | awk '{print $1}' | sed 's/\*//;s/\://')
+               actpnum=$($FDISK "$windisk" | grep -E '\*[0-9]' | awk '{print $1}' | sed 's/\*//;s/\://')
           elif [[ "$sptscheme" == "GUID_partition_scheme" ]]; then
-               if   [[ ! -z $(sudo fdisk "$sysdisk" | grep -E '2:|3:|4:' | grep -v unused) ]]; then
+               if   [[ ! -z $($FDISK "$sysdisk" | grep -E '2:|3:|4:' | grep -v unused) ]]; then
                     if   [[ "$verbose" == "true" && "$firmware" == "bios" ]]; then
                          echo "Hybrid MBR detected on $sysdisk"
                     elif [[ "$firmware" == "both" ]]; then
@@ -682,8 +682,8 @@ elif [[ "$firmware" == "bios" || "$firmware" == "both" ]]; then
                          exit 1
                     fi
                     checkmbr_signature $sysdisk
-                    actpsect=$(sudo fdisk "$sysdisk" | grep -E '\*[0-9]' | awk '{print $11}')
-                    actpnum=$(sudo gpt show "$sysdisk" 2> /dev/null | grep -w "$actpsect" | awk '{print $3}')
+                    actpsect=$($FDISK "$sysdisk" | grep -E '\*[0-9]' | awk '{print $11}')
+                    actpnum=$($GPTCMD show "$sysdisk" 2> /dev/null | grep -w "$actpsect" | awk '{print $3}')
                else
                     if [[ "$virtual" == "true" ]]; then umount_vpart; fi
                     echo -e "${BGTYELLOW}System disk $sysdisk is using GPT partition scheme.${NC}"
@@ -775,13 +775,17 @@ hdiutil detach $vrtdisk > /dev/null
 # Mount a Windows volume using NTFS-3G if available.
 # Mount options support Windows extended attributes only and dot file are hidden.
 mount_ntfs3g () {
-volname=$(sudo ntfslabel $1 2>&1 | head -n 1)
-userid=$(id | awk '{print $1}' | cut -f1 -d'(')
-groupid=$(id | awk '{print $2}' | cut -f1 -d'(')
+volname=$($NTFSLABEL $1 2>&1 | head -n 1)
+ntfs3g_opts="local,streams_interface=openxattr,hide_dot_files,noapplexattr,noappledouble,windows_names"
+
+if [[ $EUID -ne 0 ]]; then
+   userid=$(id | awk '{print $1}' | cut -f1 -d'(')
+   groupid=$(id | awk '{print $2}' | cut -f1 -d'(')
+   ntfs3g_opts+=",$userid,$groupid,allow_other"
+fi
 
 if [[ "$verbose" == "true" ]]; then echo "Mount $1 using ntfs-3g..."; fi
-sudo ntfs-3g -ovolname="$volname",local,streams_interface=openxattr,hide_dot_files,noapplexattr \
-             -onoappledouble,windows_names,$userid,$groupid,allow_other $1 /Volumes/"$volname"
+$NTFS3GCMD -ovolname="$volname",$ntfs3g_opts $1 /Volumes/"$volname"
 }
 
 # Unmount the EFI or Windows System Partition mounted automatically by get_syspath.
@@ -797,7 +801,7 @@ fi
 
 # Check for a Windows Disk Signature on the target disk when using MBR partition scheme.
 checkmbr_signature () {
-sigbytes=$(sudo xxd -u -p -s 440 -l 4 "$1")
+sigbytes=$($XXDCMD -u -p -s 440 -l 4 "$1")
 if [[ "$sigbytes" == "00000000" || -z "$sigbytes" ]]; then
    if [[ "$virtual" == "true" ]]; then umount_vpart; fi
    if [[ "$1" == "$windisk" ]]; then target="Windows"; fi
@@ -840,9 +844,19 @@ fi
 # Script starts here.
 if [[ $(uname) != "Darwin" ]]; then echo "Unsupported platform detected."; exit 1; fi
 
-if [[ $# -eq 0 ]]; then
-usage
+if   [[ $EUID -eq 0 ]]; then
+     ending="..."
+     FDISK="fdisk"; GPTCMD="gpt"; MOUNT="diskutil mount"
+     NTFSLABEL="ntfslabel"; NTFS3GCMD="ntfs-3g"; XXDCMD="xxd"
+     MATTRIB="mattrib"; BOOTOPTCMD="bootoption"
+else
+     ending=" (sudo required)..."
+     FDISK="sudo fdisk"; GPTCMD="sudo gpt"; MOUNT="sudo diskutil mount"
+     NTFSLABEL="sudo ntfslabel"; NTFS3GCMD="sudo ntfs-3g"; XXDCMD="sudo xxd"
+     MATTRIB="sudo -E mattrib"; BOOTOPTCMD="sudo bootoption"
 fi
+
+if [[ $# -eq 0 ]]; then usage; fi
 
 bashver=$(bash --version | head -n 1 | awk '{print $4}' | cut -f1 -d'(')
 
@@ -1054,14 +1068,14 @@ else
             if [[ "$setfwmod" == "false" && "$efibootvars" == "true" ]]; then
                if [[ ! -z "$wbmoptnum" ]]; then
                   if [[ "$verbose" == "true" ]]; then echo "Remove the current Windows Boot Manager option..."; fi
-                  sudo bootoption delete -n Boot"$wbmoptnum" > /dev/null
+                  $BOOTOPTCMD delete -n Boot"$wbmoptnum" > /dev/null
                fi
                if [[ "$verbose" == "true" ]]; then echo "Add the Windows Boot Manager to the firmware..."; fi
-               sudo bootoption create -l "$wbmefipath" -d "Windows Boot Manager" -@ $resdir/Templates/wbmoptdata.bin > /dev/null
+               $BOOTOPTCMD create -l "$wbmefipath" -d "Windows Boot Manager" -@ $resdir/Templates/wbmoptdata.bin > /dev/null
                get_wbmoption && create_wbmfwvar "$wbmoptnum" "$syspath"
                if [[ "$setwbmlast" == "true" ]]; then
                   maxbtnum=$(bootoption list | grep -E "[0-9]:" | sort -rn | awk 'NR==1{print $1}' | sed 's/://')
-                  sudo bootoption order 1 $maxbtnum > /dev/null
+                  $BOOTOPTCMD order 1 $maxbtnum > /dev/null
                fi
             fi
        elif [[ -f "$syswbmpath" && "$clean" == "true" ]]; then
@@ -1089,11 +1103,11 @@ else
             if [[ "$setfwmod" == "false" && "$efibootvars" == "true" ]]; then
                if [[ -z "$wbmoptnum" ]]; then
                   if [[ "$verbose" == "true" ]]; then echo "Add the Windows Boot Manager to the firmware..."; fi
-                  sudo bootoption create -l "$wbmefipath" -d "Windows Boot Manager" -@ $resdir/Templates/wbmoptdata.bin > /dev/null
+                  $BOOTOPTCMD create -l "$wbmefipath" -d "Windows Boot Manager" -@ $resdir/Templates/wbmoptdata.bin > /dev/null
                   get_wbmoption
                   if [[ "$setwbmlast" == "true" ]]; then
                      maxbtnum=$(bootoption list | grep -E "[0-9]:" | sort -rn | awk 'NR==1{print $1}' | sed 's/://')
-                     sudo bootoption order 1 $maxbtnum > /dev/null
+                     $BOOTOPTCMD order 1 $maxbtnum > /dev/null
                   fi
                fi
                create_wbmfwvar "$wbmoptnum" "$syspath"
@@ -1124,11 +1138,11 @@ else
             fi
             if [[ "$setfwmod" == "false" && "$efibootvars" == "true" && -z "$wbmoptnum" ]]; then
                if [[ "$verbose" == "true" ]]; then echo "Add the Windows Boot Manager to the firmware..."; fi
-               sudo bootoption create -l "$wbmefipath" -d "Windows Boot Manager" -@ $resdir/Templates/wbmoptdata.bin > /dev/null
+               $BOOTOPTCMD create -l "$wbmefipath" -d "Windows Boot Manager" -@ $resdir/Templates/wbmoptdata.bin > /dev/null
                get_wbmoption && create_wbmfwvar "$wbmoptnum" "$syspath"
                if [[ "$setwbmlast" == "true" ]]; then
                   maxbtnum=$(bootoption list | grep -E "[0-9]:" | sort -rn | awk 'NR==1{print $1}' | sed 's/://')
-                  sudo bootoption order 1 $maxbtnum > /dev/null
+                  $BOOTOPTCMD order 1 $maxbtnum > /dev/null
                fi
             fi
        fi

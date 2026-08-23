@@ -61,19 +61,25 @@ else
     mntpoint="$1"
 fi
 
+if   [[ $EUID -eq 0 ]]; then
+     FDISK="fdisk"; XXDCMD="xxd"
+else
+     FDISK="sudo fdisk"; XXDCMD="sudo xxd"
+fi
+
 if  [[ "$virtual" == "true" ]]; then
-    virtpart=$(diskutil info "$(basename "$vhdmount")" | grep "Device Node:" | awk '{print $3}')
+    virtpart=$(diskutil info "$vhdmount" | grep "Device Node:" | awk '{print $3}')
     virtdisk=$(printf $virtpart | sed 's/s[0-9]*$//')
     vtscheme=$(diskutil info $virtdisk | grep "Content (IOContent):" | awk '{print $3}')
-    physpart=$(diskutil info "$(basename "$imgmount")" | grep "Device Node:" | awk '{print $3}')
+    physpart=$(diskutil info "$imgmount" | grep "Device Node:" | awk '{print $3}')
     physdisk=$(printf $physpart | sed 's/s[0-9]*$//')
     pyscheme=$(diskutil info $physdisk | grep "Content (IOContent):" | awk '{print $3}')
 else
-    part=$(diskutil info "$(basename "$mntpoint")" | grep "Device Node:" | awk '{print $3}')
+    part=$(diskutil info "$mntpoint" | grep "Device Node:" | awk '{print $3}')
     disk=$(printf $part | sed 's/s[0-9]*$//')
     scheme=$(diskutil info $disk | grep "Content (IOContent):" | awk '{print $3}')
     if [[ "$scheme" == "GUID_partition_scheme" ]]; then
-       if [[ ! -z $(sudo fdisk "$disk" | grep -E '2:|3:|4:' | grep -v unused) ]]; then
+       if [[ ! -z $($FDISK "$disk" | grep -E '2:|3:|4:' | grep -v unused) ]]; then
           scheme="FDisk_partition_scheme" #Use fdisk option for GPT disk with hybrid MBR.
        fi
     fi
@@ -82,15 +88,15 @@ fi
 if  [[ "$virtual" == "true" ]]; then
     if   [[ "$vtscheme" == "GUID_partition_scheme" ]]; then
          vtsectsz=$(blksize $virtdisk)
-         vtdiskbytes=$(sudo xxd -u -p -s $(($vtsectsz + 56)) -l 16 $virtdisk | sed 's/.\{2\}/&,/g;s/,$//')
+         vtdiskbytes=$($XXDCMD -u -p -s $(($vtsectsz + 56)) -l 16 $virtdisk | sed 's/.\{2\}/&,/g;s/,$//')
          vtpartguid=$(diskutil info $virtpart | grep "Partition UUID:" | awk '{print $5}')
          vtpartbytes=$(printf "%s" $(guid_bytes $vtpartguid) | sed 's/.\{2\}/&,/g;s/,$//')
          vtschemebyte="00"
     elif [[ "$vtscheme" == "FDisk_partition_scheme" ]]; then
-         vtdisksig=$(sudo xxd -u -p -s 440 -l 4 $virtdisk)
+         vtdisksig=$($XXDCMD -u -p -s 440 -l 4 $virtdisk)
          vtpartoffset=$(diskutil info $virtpart | grep "Partition Offset:" | awk '{print $3}')
          if [[ -z $vtpartoffset ]]; then
-            hidsect=$(sudo fdisk $virtdisk | tail -n +6 | awk -v partnum=${virtpart##*s} 'FNR == partnum {print $11}')
+            hidsect=$($FDISK $virtdisk | tail -n +6 | awk -v partnum=${virtpart##*s} 'FNR == partnum {print $11}')
             sectsize=$(blksize $virtdisk)
             vtpartoffset=$(($sectsize * $hidsect))
          fi
@@ -100,15 +106,15 @@ if  [[ "$virtual" == "true" ]]; then
     fi
     if   [[ "$pyscheme" == "GUID_partition_scheme" ]]; then
          pysectsz=$(blksize $physdisk)
-         pydiskbytes=$(sudo xxd -u -p -s $(($pysectsz + 56)) -l 16 $physdisk | sed 's/.\{2\}/&,/g;s/,$//')
+         pydiskbytes=$($XXDCMD -u -p -s $(($pysectsz + 56)) -l 16 $physdisk | sed 's/.\{2\}/&,/g;s/,$//')
          pypartguid=$(diskutil info $physpart | grep "Partition UUID:" | awk '{print $5}')
          pypartbytes=$(printf "%s" $(guid_bytes $pypartguid) | sed 's/.\{2\}/&,/g;s/,$//')
          pyschemebyte="00"
     elif [[ "$pyscheme" == "FDisk_partition_scheme" ]]; then
-         pydisksig=$(sudo xxd -u -p -s 440 -l 4 $physdisk)
+         pydisksig=$($XXDCMD -u -p -s 440 -l 4 $physdisk)
          pypartoffset=$(diskutil info $physpart | grep "Partition Offset:" | awk '{print $3}')
          if [[ -z $pypartoffset ]]; then
-            hidsect=$(sudo fdisk $physdisk | tail -n +6 | awk -v partnum=${physpart##*s} 'FNR == partnum {print $11}')
+            hidsect=$($FDISK $physdisk | tail -n +6 | awk -v partnum=${physpart##*s} 'FNR == partnum {print $11}')
             sectsize=$(blksize $physdisk)
             pypartoffset=$(($sectsize * $hidsect))
          fi
@@ -127,15 +133,15 @@ if  [[ "$virtual" == "true" ]]; then
 else
     if   [[ "$scheme" == "GUID_partition_scheme" ]]; then
          sectsize=$(blksize $disk)
-         diskbytes=$(sudo xxd -u -p -s $(($sectsize + 56)) -l 16 $disk | sed 's/.\{2\}/&,/g;s/,$//')
+         diskbytes=$($XXDCMD -u -p -s $(($sectsize + 56)) -l 16 $disk | sed 's/.\{2\}/&,/g;s/,$//')
          partguid=$(diskutil info $part | grep "Partition UUID:" | awk '{print $5}')
          partbytes=$(printf "%s" $(guid_bytes $partguid) | sed 's/.\{2\}/&,/g;s/,$//')
          schemebyte="00"
     elif [[ "$scheme" == "FDisk_partition_scheme" ]]; then
-         disksig=$(sudo xxd -u -p -s 440 -l 4 $disk)
+         disksig=$($XXDCMD -u -p -s 440 -l 4 $disk)
          partoffset=$(diskutil info $part | grep "Partition Offset:" | awk '{print $3}')
          if [[ -z $partoffset ]]; then
-            hidsect=$(sudo fdisk $disk | tail -n +6 | awk -v partnum=${part##*s} 'FNR == partnum {print $11}')
+            hidsect=$($FDISK $disk | tail -n +6 | awk -v partnum=${part##*s} 'FNR == partnum {print $11}')
             sectsize=$(blksize $disk)
             partoffset=$(($sectsize * $hidsect))
          fi
