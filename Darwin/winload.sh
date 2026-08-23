@@ -18,7 +18,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 gen_uuid () {
-python3 -c 'import uuid; print(uuid.uuid4())'
+$PYTHCMD -c 'import uuid; print(uuid.uuid4())'
 }
 
 guid_list () {
@@ -40,6 +40,7 @@ prodname="$7"
 locale="$8"
 verbose="$9"
 virtual="${10}"
+appbundle="false"
 
 if  [[ "$virtual" == "true" ]]; then
     winvhdpath="$1"
@@ -48,6 +49,9 @@ if  [[ "$virtual" == "true" ]]; then
 else
     sourcepath="$1"
 fi
+
+if [[ ! -z $(command -v python3) ]]; then PYTHCMD=python3; else PYTHCMD=python; fi
+if [[ "$appbundle" == "true" && -z $(command -v realpath) ]]; then enable -f realpath realpath; fi
 
 resdir="."
 winresguid=$(gen_uuid)

@@ -32,8 +32,15 @@ while (( "$#" )); do
 	     --appdir )
 	        shift
 	        appdir="$1"
-	        bindir="$appdir/usr/bin"
-	        resdir="$appdir/usr/share/BCD-SYS"
+	        if   [[ "$platform" == "Darwin" ]]; then
+	             bindir="$appdir/Contents/Resources/bin"
+	             libdir="$appdir/Contents/Resources/lib"
+	             resdir="$appdir/Contents/Resources/share/BCD-SYS"
+	        elif [[ "$platform" == "Linux" ]]; then
+	             bindir="$appdir/usr/bin"
+	             libdir="$appdir/usr/lib"
+	             resdir="$appdir/usr/share/BCD-SYS"
+	        fi
 	        appimage="true"
 	        shift
 	        ;;
@@ -76,17 +83,24 @@ if   [[ "$option" == "install" ]]; then
      cp -r Templates $resdir
      echo "Update script and template paths..."
      if [[ "$appimage" == "true" ]]; then
-        respath='\$\(dirname \"\$\(readlink \-f \"\$\{0\}\"\)\"\)/../share/BCD-SYS'
-        perl -i -pe"s|appimage=\"false\"|appimage=\"true\"|" $bindir/bcd-sys
+        if   [[ "$platform" == "Darwin" ]]; then
+             apptype="appbundle"
+             perl -i -pe"s|$apptype=\"false\"|$apptype=\"true\"|" $resdir/recovery.sh
+             perl -i -pe"s|$apptype=\"false\"|$apptype=\"true\"|" $resdir/winload.sh
+        elif [[ "$platform" == "Linux" ]]; then
+             apptype="appimage"
+        fi
+        perl -i -pe"s|$apptype=\"false\"|$apptype=\"true\"|" $bindir/bcd-sys
+        respath='\$\(dirname \"\$\(realpath \"\$\{0\}\"\)\"\)/../share/BCD-SYS'
      fi
      perl -i -pe"s|resdir=\".\"|resdir=\"$respath\"|" $bindir/bcd-sys
      perl -i -pe"s|tmpdir=\".\"|tmpdir=\"/tmp\"|" $bindir/bcd-sys
      if [[ "$appimage" == "true" ]]; then
-        respath='\$\(dirname \"\$\(readlink \-f \"\$\{0\}\"\)\"\)'
+        respath='\$\(dirname \"\$\(realpath \"\$\{0\}\"\)\"\)'
      fi
      perl -i -pe"s|resdir=\".\"|resdir=\"$respath\"|" $resdir/recovery.sh
      perl -i -pe"s|resdir=\".\"|resdir=\"$respath\"|" $resdir/winload.sh
-     if [[ "$appimage" == "true" ]]; then mkdir -p "$appdir/usr/lib"; fi
+     if [[ "$appimage" == "true" ]]; then mkdir -p "$libdir"; fi
      echo "Finished."
 elif [[ "$option" == "uninstall" ]]; then
      echo "Removing scripts and resources..."

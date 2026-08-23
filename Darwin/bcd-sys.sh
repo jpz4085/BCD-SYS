@@ -27,6 +27,16 @@ clean="false"
 virtual="false"
 rmsysmnt="false"
 verbose="false"
+appbundle="false"
+
+if [[ "$appbundle" == "true" ]]; then
+   if [[ -z $(command -v realpath) ]]; then
+      enable -f realpath realpath
+   fi
+   parent="$(ps -o command= -p "$PPID")"
+   macosver=$(sw_vers -productVersion)
+fi
+
 resdir="."
 tmpdir="."
 
@@ -251,6 +261,15 @@ windisk="$2"
 
 if   [[ "$firmware" == "uefi" ]]; then
      echo "Checking block devices for ESP$ending"
+     if [[ "$appbundle" == "true" && "$parent" == "/sbin/launchd" ]]; then
+        sudo -Sv #Cache credentials and check sudo policy when using launchd.
+        if ! sudo -l | grep -qE 'timestamp_type=global|!tty_tickets'; then
+           if [[ "$virtual" == "true" ]]; then umount_vpart; fi
+           echo -e "${RED}The current sudo policy is incompatible with use of the open command.${NC}"
+           echo "Run from terminal or enable global timestamps or disable tty_tickets."
+           exit 1
+        fi
+     fi
      if   [[ "$wptscheme" == "FDisk_partition_scheme" ]]; then
           checkmbr_signature $windisk
      elif [[ "$wptscheme" == "GUID_partition_scheme" ]]; then
@@ -347,6 +366,15 @@ if   [[ "$firmware" == "uefi" ]]; then
      fi
 elif [[ "$firmware" == "bios" || "$firmware" == "both" ]]; then
      echo "Checking block devices for active partition$ending"
+     if [[ "$appbundle" == "true" && "$parent" == "/sbin/launchd" ]]; then
+        sudo -Sv #Cache credentials and check sudo policy when using launchd.
+        if ! sudo -l | grep -qE 'timestamp_type=global|!tty_tickets'; then
+           if [[ "$virtual" == "true" ]]; then umount_vpart; fi
+           echo -e "${RED}The current sudo policy is incompatible with use of the open command.${NC}"
+           echo "Run from terminal or enable global timestamps or disable tty_tickets."
+           exit 1
+        fi
+     fi
      if   [[ "$wptscheme" == "FDisk_partition_scheme" ]]; then
           checkmbr_signature $windisk
           actpnum=$($FDISK "$windisk" | grep -E '\*[0-9]' | awk '{print $1}' | sed 's/\*//;s/\://')
@@ -502,6 +530,15 @@ syspath="$2"
 
 if   [[ "$firmware" == "uefi" ]]; then
      echo "Get block device for mount point$ending"
+     if [[ "$appbundle" == "true" && "$parent" == "/sbin/launchd" ]]; then
+        sudo -Sv #Cache credentials and check sudo policy when using launchd.
+        if ! sudo -l | grep -qE 'timestamp_type=global|!tty_tickets'; then
+           if [[ "$virtual" == "true" ]]; then umount_vpart; fi
+           echo -e "${RED}The current sudo policy is incompatible with use of the open command.${NC}"
+           echo "Run from terminal or enable global timestamps or disable tty_tickets."
+           exit 1
+        fi
+     fi
      if   [[ "$wptscheme" == "FDisk_partition_scheme" ]]; then
           checkmbr_signature $windisk
      elif [[ "$wptscheme" == "GUID_partition_scheme" ]]; then
@@ -586,6 +623,15 @@ if   [[ "$firmware" == "uefi" ]]; then
      fi
 elif [[ "$firmware" == "bios" || "$firmware" == "both" ]]; then
      echo "Checking block device for active partition$ending"
+     if [[ "$appbundle" == "true" && "$parent" == "/sbin/launchd" ]]; then
+        sudo -Sv #Cache credentials and check sudo policy when using launchd.
+        if ! sudo -l | grep -qE 'timestamp_type=global|!tty_tickets'; then
+           if [[ "$virtual" == "true" ]]; then umount_vpart; fi
+           echo -e "${RED}The current sudo policy is incompatible with use of the open command.${NC}"
+           echo "Run from terminal or enable global timestamps or disable tty_tickets."
+           exit 1
+        fi
+     fi
      syspart=$(diskutil info "$syspath" | grep "Device Node:" | awk '{print $3}')
      mounted=$(diskutil info "$syspart" | grep "Mounted:" | awk '{print $2}')
      if   [[ "$mounted" == "Yes" ]]; then
@@ -843,6 +889,13 @@ fi
 
 # Script starts here.
 if [[ $(uname) != "Darwin" ]]; then echo "Unsupported platform detected."; exit 1; fi
+
+if [[ "$appbundle" == "true" ]]; then
+   if [[ "$macosver" != "10.13"* && $(printf "$macosver\n10.13.6\n" | sort -rV | head -1) == "10.13.6" ]]; then
+      echo "Version $macosver is not supported. macOS 10.13 or later required."
+      exit 1
+   fi
+fi
 
 if   [[ $EUID -eq 0 ]]; then
      ending="..."

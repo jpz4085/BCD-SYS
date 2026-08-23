@@ -20,6 +20,10 @@
 destpath="$1"
 createbcd="$2"
 locale="$3"
+appbundle="false"
+
+if [[ "$appbundle" == "true" && -z $(command -v realpath) ]]; then enable -f realpath realpath; fi
+
 resdir="."
 recbcdpath="$destpath/EFI/Microsoft/Recovery/BCD"
 locscript="cd Objects\\{9dea862c-5cdd-4e70-acc1-f32b344d4795}\\\Elements\\\12000005\nlsval Element\nunload\n"
