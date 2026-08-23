@@ -1176,13 +1176,15 @@ else
               exit 1
           fi
        fi
-       if   [[ -f "$localmgrpath" && -f "$localuwfpath" && -f "$localvhdpath" ]]; then
-            localuwfver=$(peres -v "$localuwfpath" 2> /dev/null | grep 'Product Version:' | awk '{print $3}')
-            localvhdver=$(peres -v "$localvhdpath" 2> /dev/null | grep 'Product Version:' | awk '{print $3}')
-       elif [[ -f "$localmgrpath" && -f "$localmempath" ]]; then
+       if   [[ -f "$localmgrpath" ]]; then
+            if   [[ -f "$localuwfpath" && -f "$localvhdpath" ]]; then
+                 localuwfver=$(peres -v "$localuwfpath" 2> /dev/null | grep 'Product Version:' | awk '{print $3}')
+                 localvhdver=$(peres -v "$localvhdpath" 2> /dev/null | grep 'Product Version:' | awk '{print $3}')
+            else
+                 localuwfver="NULL"
+                 localvhdver="NULL"
+            fi
             localmemver=$(peres -v "$localmempath" 2> /dev/null | grep 'Product Version:' | awk '{print $3}')
-            localuwfver="NULL"
-            localvhdver="NULL"
        else
            if  [[ "$virtual" == "true" ]]; then
                echo -e "${RED}Unable to find the BIOS boot files at $vrtpath${NC}"
@@ -1193,15 +1195,16 @@ else
            if [[ "$rmsysmnt" == "true" ]]; then umount_system; fi
            exit 1
        fi
-       if   [[ -f "$syspath/bootmgr" && -f "$sysuwfpath" && -f "$sysvhdpath" ]]; then
-            sysuwfver=$(peres -v "$sysuwfpath" 2> /dev/null | grep 'Product Version:' | awk '{print $3}')
-            sysvhdver=$(peres -v "$sysvhdpath" 2> /dev/null | grep 'Product Version:' | awk '{print $3}')
-            sysbtmgr="true"
-       elif [[ -f "$syspath/bootmgr" && -f "$sysmempath" ]]; then
-            sysmemver=$(peres -v "$sysmempath" 2> /dev/null | grep 'Product Version:' | awk '{print $3}')
-            sysuwfver="NULL"
-            sysvhdver="NULL"
-            sysbtmgr="true"
+       if [[ -f "$syspath/bootmgr" ]]; then
+          if   [[ -f "$sysuwfpath" && -f "$sysvhdpath" ]]; then
+               sysuwfver=$(peres -v "$sysuwfpath" 2> /dev/null | grep 'Product Version:' | awk '{print $3}')
+               sysvhdver=$(peres -v "$sysvhdpath" 2> /dev/null | grep 'Product Version:' | awk '{print $3}')
+          else
+               sysuwfver="NULL"
+               sysvhdver="NULL"
+          fi
+          sysmemver=$(peres -v "$sysmempath" 2> /dev/null | grep 'Product Version:' | awk '{print $3}')
+          sysbtmgr="true"
        fi
        if [[ "$sysbtmgr" == "false" ]]; then
           if  [[ "$virtual" == "true" ]]; then
@@ -1223,7 +1226,7 @@ else
                  if [[ "$sysuwfver" != "$localuwfver" || "$sysvhdver" != "$localvhdver" ]]; then
                     if [[ $(printf "$sysuwfver\n$localuwfver\n" | sort -rV | head -1) == "$localuwfver" ||
                           $(printf "$sysvhdver\n$localvhdver\n" | sort -rV | head -1) == "$localvhdver" ]]; then
-                       rm -rf "$syspath/Boot" && rm -f "$syspath/bootmgr $syspath/bootnxt"
+                       rm -rf "$syspath/Boot"; rm -f "$syspath/bootmgr; rm -f $syspath/bootnxt"
                        if  [[ "$virtual" == "true" ]]; then
                            copy_bootmgr "$vrtpath" "$syspath" "$fwmode" "$sysfstype"
                        else
@@ -1234,7 +1237,7 @@ else
             else
                  if [[ "$sysmemver" != "$localmemver" ]]; then
                     if [[ $(printf "$sysmemver\n$localmemver\n" | sort -rV | head -1) == "$localmemver" ]]; then
-                       rm -rf "$syspath/Boot" && rm -f "$syspath/bootmgr $syspath/bootnxt"
+                       rm -rf "$syspath/Boot"; rm -f "$syspath/bootmgr; rm -f $syspath/bootnxt"
                        if  [[ "$virtual" == "true" ]]; then
                            copy_bootmgr "$vrtpath" "$syspath" "$fwmode" "$sysfstype"
                        else
@@ -1258,7 +1261,7 @@ else
                           $(printf "$sysvhdver\n$localvhdver\n" | sort -rV | head -1) == "$localvhdver" ]]; then
                        if [[ "$verbose" == "true" ]]; then echo "Backup current BCD store before update..."; fi
                        mv "$syspath/Boot/BCD" "$syspath"
-                       rm -rf "$syspath/Boot" && rm -f "$syspath/bootmgr $syspath/bootnxt"
+                       rm -rf "$syspath/Boot"; rm -f "$syspath/bootmgr; rm -f $syspath/bootnxt"
                        if  [[ "$virtual" == "true" ]]; then
                            copy_bootmgr "$vrtpath" "$syspath" "$fwmode" "$sysfstype"
                        else
@@ -1273,7 +1276,7 @@ else
                     if [[ $(printf "$sysmemver\n$localmemver\n" | sort -rV | head -1) == "$localmemver" ]]; then
                        if [[ "$verbose" == "true" ]]; then echo "Backup current BCD store before update..."; fi
                        mv "$syspath/Boot/BCD" "$syspath"
-                       rm -rf "$syspath/Boot" && rm -f "$syspath/bootmgr $syspath/bootnxt"
+                       rm -rf "$syspath/Boot"; rm -f "$syspath/bootmgr; rm -f $syspath/bootnxt"
                        if  [[ "$virtual" == "true" ]]; then
                            copy_bootmgr "$vrtpath" "$syspath" "$fwmode" "$sysfstype"
                        else
