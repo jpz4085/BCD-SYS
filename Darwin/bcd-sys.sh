@@ -515,14 +515,17 @@ if   [[ "$firmware" == "uefi" ]]; then
      if [[ "$virtual" == "true" && "$vptscheme" == "FDisk_partition_scheme" ]]; then
         checkmbr_signature $vrtdisk
      fi
-     mounted=$(diskutil info "$(basename "$syspath")" | grep "Mounted:" | awk '{print $2}')
+     efipart=$(diskutil info "$syspath" | grep "Device Node:" | awk '{print $3}')
+     mounted=$(diskutil info "$efipart" | grep "Mounted:" | awk '{print $2}')
      if   [[ "$mounted" == "Yes" ]]; then
-          efipart=$(diskutil info "$(basename "$syspath")" | grep "Device Node:" | awk '{print $3}')
+          if [[ "$verbose" == "true" ]]; then echo "Found device '$efipart' for path '$syspath'"; fi
      elif [[ "$mounted" == "No" ]]; then
-          efipart=$(diskutil info "$syspath" | grep "Device Node:" | awk '{print $3}')
-     else
+          echo -e "${RED}Found device $efipart which is not mounted.{NC}"
           if [[ "$virtual" == "true" ]]; then umount_vpart; fi
+          exit 1
+     else
           echo -e "${RED}Unable to get mount status of $syspath${NC}"
+          if [[ "$virtual" == "true" ]]; then umount_vpart; fi
           exit 1
      fi
      if   [[ ! -z "$efipart" ]]; then
@@ -583,14 +586,16 @@ if   [[ "$firmware" == "uefi" ]]; then
      fi
 elif [[ "$firmware" == "bios" || "$firmware" == "both" ]]; then
      echo "Checking block device for active partition (sudo required)..."
-     mounted=$(diskutil info "$(basename "$syspath")" | grep "Mounted:" | awk '{print $2}')
+     syspart=$(diskutil info "$syspath" | grep "Device Node:" | awk '{print $3}')
+     mounted=$(diskutil info "$syspart" | grep "Mounted:" | awk '{print $2}')
      if   [[ "$mounted" == "Yes" ]]; then
-          syspart=$(diskutil info "$(basename "$syspath")" | grep "Device Node:" | awk '{print $3}')
+          if [[ "$verbose" == "true" ]]; then echo "Found device '$syspart' for path '$syspath'"; fi
      elif [[ "$mounted" == "No" ]]; then
-          syspart=$(diskutil info "$syspath" | grep "Device Node:" | awk '{print $3}')
-     else
+          echo -e "${RED}Found device $syspart which is not mounted.{NC}"
           if [[ "$virtual" == "true" ]]; then umount_vpart; fi
+     else
           echo -e "${RED}Unable to get mount status of $syspath${NC}"
+          if [[ "$virtual" == "true" ]]; then umount_vpart; fi
           exit 1
      fi
      if   [[ ! -z "$syspart" ]]; then
@@ -980,9 +985,7 @@ if  [[ "$firmware" != "uefi" && "$firmware" != "bios" && "$firmware" != "both" ]
     exit 1
 else
     if [[ -f $tmpdir/winload.txt || -f $tmpdir/recovery.txt || -f $tmpdir/wbmfwvar.txt || \
-          -f $tmpdir/BCD-Windows || -f $tmpdir/BCD-Recovery ]]; then
-       cleanup
-    fi
+          -f $tmpdir/BCD-Windows || -f $tmpdir/BCD-Recovery ]]; then cleanup; fi
     if [[ "$firmware" == "uefi" || "$firmware" == "both" ]]; then
        if  [[ -z "$syspath" ]]; then
            get_syspath "$firmware" "$windisk"
